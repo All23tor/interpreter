@@ -1,0 +1,179 @@
+#include "Interpreter.hpp"
+
+namespace {
+struct Number final : public Node {
+  const float number;
+
+  Number(float _number) : number{_number} {}
+  ~Number() override = default;
+  float evaluate(const Context&) const override {
+    return number;
+  }
+};
+
+struct Variable final : public Node {
+  const std::string name;
+
+  Variable(std::string _name) : name{std::move(_name)} {}
+  ~Variable() override = default;
+  float evaluate(const Context& context) const override {
+    return context.at(name);
+  }
+};
+
+template <float (*Func)(float, float)>
+struct Operation final : public Node {
+  const std::unique_ptr<Node> left;
+  const std::unique_ptr<Node> right;
+
+  Operation(std::unique_ptr<Node>&& _left, std::unique_ptr<Node>&& _right) :
+      left(std::move(_left)),
+      right(std::move(_right)) {}
+  virtual ~Operation() override = default;
+  float evaluate(const Context& context) const override {
+    return Func(left->evaluate(context), right->evaluate(context));
+  }
+};
+
+using Or = Operation<[](float a, float b) -> float {
+  return a || b;
+}>;
+using And = Operation<[](float a, float b) -> float {
+  return a && b;
+}>;
+using More = Operation<[](float a, float b) -> float {
+  return (a > b);
+}>;
+using Less = Operation<[](float a, float b) -> float {
+  return a < b;
+}>;
+using Equals = Operation<[](float a, float b) -> float {
+  return a == b;
+}>;
+using Plus = Operation<[](float a, float b) {
+  return a + b;
+}>;
+using Minus = Operation<[](float a, float b) {
+  return a - b;
+}>;
+using Times = Operation<[](float a, float b) {
+  return a * b;
+}>;
+using Over = Operation<[](float a, float b) {
+  return a / b;
+}>;
+
+static bool isOperator(char c) {
+  return c == '+' || c == '-' || c == '*' || c == '/' || c == '|' || c == '&' ||
+         c == '>' || c == '<' || c == '=';
+}
+
+bool isLower(char op1, char op2) {
+  static constexpr int (*getPrecedence)(char) = [](char op) {
+    switch (op) {
+    case '|':
+      return 1;
+    case '&':
+      return 2;
+    case '>':
+      return 3;
+    case '<':
+      return 4;
+    case '=':
+      return 5;
+    case '+':
+      return 6;
+    case '-':
+      return 7;
+    case '*':
+      return 8;
+    case '/':
+      return 9;
+    default:
+      return 0;
+    }
+  };
+
+  return getPrecedence(op1) <= getPrecedence(op2);
+}
+
+struct OperatorInfo {
+  char op;
+  size_t position;
+};
+
+OperatorInfo lowestOperator(std::string_view expr) {
+  char currentOp = '\0';
+  auto opPosition = std::string::npos;
+
+  bool expectUnary = true;
+
+  for (size_t i = 0; i < expr.length(); ++i) {
+    char c = expr[i];
+
+    if (!isOperator(c)) {
+      expectUnary = false;
+      continue;
+    }
+
+    if (c == '-' && expectUnary)
+      continue;
+
+    if (!currentOp || isLower(c, currentOp)) {
+      currentOp = c;
+      opPosition = i;
+    }
+
+    expectUnary = true;
+  }
+
+  return OperatorInfo{currentOp, opPosition};
+};
+
+std::unique_ptr<Node> makeTree(std::string expression,
+                               std::set<std::string>& vars) {
+  std::erase(expression, ' ');
+  auto [op, position] = lowestOperator(expression);
+
+  if (op == '\0') {
+    if (expression.front() == '$') {
+      auto varName = expression.substr(1);
+      vars.insert(varName);
+      return std::make_unique<Variable>(std::move(varName));
+    }
+    return std::make_unique<Number>(std::stof(expression));
+  }
+
+  auto leftNode = makeTree(expression.substr(0, position), vars);
+  auto rightNode = makeTree(expression.substr(position + 1), vars);
+
+  switch (op) {
+  case '|':
+    return std::make_unique<Or>(std::move(leftNode), std::move(rightNode));
+  case '&':
+    return std::make_unique<And>(std::move(leftNode), std::move(rightNode));
+  case '>':
+    return std::make_unique<More>(std::move(leftNode), std::move(rightNode));
+  case '<':
+    return std::make_unique<Less>(std::move(leftNode), std::move(rightNode));
+  case '=':
+    return std::make_unique<Equals>(std::move(leftNode), std::move(rightNode));
+  case '+':
+    return std::make_unique<Plus>(std::move(leftNode), std::move(rightNode));
+  case '-':
+    return std::make_unique<Minus>(std::move(leftNode), std::move(rightNode));
+  case '*':
+    return std::make_unique<Times>(std::move(leftNode), std::move(rightNode));
+  case '/':
+    return std::make_unique<Over>(std::move(leftNode), std::move(rightNode));
+  default:
+    return nullptr;
+  }
+}
+} // namespace
+
+ParseResult parseExpression(const std::string& str) {
+  std::set<std::string> variables;
+  auto tree = makeTree(str, variables);
+  return {std::move(tree), std::move(variables)};
+}
