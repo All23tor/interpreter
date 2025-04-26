@@ -18,6 +18,7 @@ struct Number final : public Node {
 using Bool = Number<bool>;
 using Int = Number<int>;
 using Float = Number<float>;
+using String = Number<std::string>;
 
 struct Variable final : public Node {
   const std::string name;
@@ -45,31 +46,94 @@ struct Operation final : public Node {
 };
 
 using Or = Operation<[](auto&& a, auto&& b) -> Value {
-  return a || b;
+  using A = std::remove_cvref_t<decltype(a)>;
+  using B = std::remove_cvref_t<decltype(b)>;
+  constexpr bool aStr = std::is_same_v<A, std::string>;
+  constexpr bool bStr = std::is_same_v<B, std::string>;
+  if constexpr (aStr || bStr)
+    throw;
+  else
+    return a || b;
 }>;
 using And = Operation<[](auto&& a, auto&& b) -> Value {
-  return a && b;
+  using A = std::remove_cvref_t<decltype(a)>;
+  using B = std::remove_cvref_t<decltype(b)>;
+  constexpr bool aStr = std::is_same_v<A, std::string>;
+  constexpr bool bStr = std::is_same_v<B, std::string>;
+  if constexpr (aStr || bStr)
+    throw;
+  else
+    return a && b;
 }>;
 using More = Operation<[](auto&& a, auto&& b) -> Value {
-  return (a > b);
+  using A = std::remove_cvref_t<decltype(a)>;
+  using B = std::remove_cvref_t<decltype(b)>;
+  constexpr bool aStr = std::is_same_v<A, std::string>;
+  constexpr bool bStr = std::is_same_v<B, std::string>;
+  if constexpr (aStr != bStr)
+    throw;
+  else
+    return (a > b);
 }>;
 using Less = Operation<[](auto&& a, auto&& b) -> Value {
-  return a < b;
+  using A = std::remove_cvref_t<decltype(a)>;
+  using B = std::remove_cvref_t<decltype(b)>;
+  constexpr bool aStr = std::is_same_v<A, std::string>;
+  constexpr bool bStr = std::is_same_v<B, std::string>;
+  if constexpr (aStr != bStr)
+    throw;
+  else
+    return a < b;
 }>;
 using Equals = Operation<[](auto&& a, auto&& b) -> Value {
-  return a == b;
+  using A = std::remove_cvref_t<decltype(a)>;
+  using B = std::remove_cvref_t<decltype(b)>;
+  constexpr bool aStr = std::is_same_v<A, std::string>;
+  constexpr bool bStr = std::is_same_v<B, std::string>;
+  if constexpr (aStr != bStr)
+    throw;
+  else
+    return a == b;
 }>;
 using Plus = Operation<[](auto&& a, auto&& b) -> Value {
-  return a + b;
+  using A = std::remove_cvref_t<decltype(a)>;
+  using B = std::remove_cvref_t<decltype(b)>;
+  constexpr bool aStr = std::is_same_v<A, std::string>;
+  constexpr bool bStr = std::is_same_v<B, std::string>;
+  if constexpr (aStr != bStr)
+    throw;
+  else
+    return a + b;
 }>;
 using Minus = Operation<[](auto&& a, auto&& b) -> Value {
-  return a - b;
+  using A = std::remove_cvref_t<decltype(a)>;
+  using B = std::remove_cvref_t<decltype(b)>;
+  constexpr bool aStr = std::is_same_v<A, std::string>;
+  constexpr bool bStr = std::is_same_v<B, std::string>;
+  if constexpr (aStr || bStr)
+    throw;
+  else
+    return a - b;
 }>;
 using Times = Operation<[](auto&& a, auto&& b) -> Value {
-  return a * b;
+  using A = std::remove_cvref_t<decltype(a)>;
+  using B = std::remove_cvref_t<decltype(b)>;
+  constexpr bool aStr = std::is_same_v<A, std::string>;
+  constexpr bool bStr = std::is_same_v<B, std::string>;
+  if constexpr (aStr || bStr)
+    throw;
+  else
+    return a * b;
 }>;
 using Over = Operation<[](auto&& a, auto&& b) -> Value {
-  return a / b;
+  using A = std::remove_cvref_t<decltype(a)>;
+  using B = std::remove_cvref_t<decltype(b)>;
+  constexpr bool aStr = std::is_same_v<A, std::string>;
+  constexpr bool bStr = std::is_same_v<B, std::string>;
+  if constexpr (aStr || bStr)
+    throw;
+  else
+    return a / b;
 }>;
 
 static bool isOperator(char c) {
@@ -168,9 +232,13 @@ std::unique_ptr<Node> makeTree(std::string&& expression,
 
   if (opPos == std::string::npos) {
     if (expression.front() == '$') {
-      auto varName = expression.substr(1);
-      vars.insert(varName);
-      return std::make_unique<Variable>(std::move(varName));
+      expression.erase(0, 1);
+      vars.insert(expression);
+      return std::make_unique<Variable>(std::move(expression));
+    } else if (expression.front() == '"') {
+      expression.pop_back();
+      expression.erase(0, 1);
+      return std::make_unique<String>(std::move(expression));
     } else if (expression == "true")
       return std::make_unique<Bool>(true);
     else if (expression == "false")

@@ -4,7 +4,7 @@
 #include <string>
 #include <variant>
 
-using Value = std::variant<bool, int, float>;
+using Value = std::variant<bool, int, float, std::string>;
 using Context = std::map<std::string, Value>;
 
 struct Node {

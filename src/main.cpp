@@ -1,4 +1,5 @@
 #include "Interpreter.hpp"
+#include <iomanip>
 #include <iostream>
 
 Context makeContext(const std::set<std::string>& variables) {
@@ -9,7 +10,11 @@ Context makeContext(const std::set<std::string>& variables) {
         std::clog << '\t' << name << ": ";
         std::string value;
         std::cin >> value;
-        if (value == "true") {
+        if (value.front() == '"' && value.length() > 1 && value.back() == '"') {
+          value.pop_back();
+          value.erase(0, 1);
+          context[name] = std::move(value);
+        } else if (value == "true") {
           context[name] = true;
         } else if (value == "false") {
           context[name] = false;
@@ -37,7 +42,11 @@ int main() {
     Context context = makeContext(variables);
     std::visit(
         [](auto&& arg) {
-          std::cout << std::boolalpha << arg << '\n';
+          using T = std::remove_cvref_t<decltype(arg)>;
+          if constexpr (std::is_same_v<std::string, T>)
+            std::cout << std::quoted(arg) << '\n';
+          else
+            std::cout << std::boolalpha << arg << '\n';
         },
         tree->evaluate(context));
   } catch (...) {
