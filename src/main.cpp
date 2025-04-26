@@ -9,7 +9,14 @@ Context makeContext(const std::set<std::string>& variables) {
         std::clog << '\t' << name << ": ";
         std::string value;
         std::cin >> value;
-        context[name] = std::stof(value);
+        if (value == "true") {
+          context[name] = true;
+        } else if (value == "false") {
+          context[name] = false;
+        } else if (value.contains('.'))
+          context[name] = std::stof(value);
+        else
+          context[name] = std::stoi(value);
         break;
       } catch (...) {
         std::cerr << '\t' << "Wrong assignment\n";
