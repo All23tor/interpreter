@@ -4,8 +4,8 @@
 #include <string>
 #include <variant>
 
-using Context = std::map<std::string, float>;
 using Value = std::variant<bool, int, float>;
+using Context = std::map<std::string, Value>;
 
 struct Node {
   virtual ~Node() = default;

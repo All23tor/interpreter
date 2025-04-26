@@ -15,6 +15,10 @@ struct Number final : public Node {
   }
 };
 
+using Bool = Number<bool>;
+using Int = Number<int>;
+using Float = Number<float>;
+
 struct Variable final : public Node {
   const std::string name;
 
@@ -175,8 +179,14 @@ std::unique_ptr<Node> makeTree(std::string&& expression,
       auto varName = expression.substr(1);
       vars.insert(varName);
       return std::make_unique<Variable>(std::move(varName));
-    }
-    return std::make_unique<Number<float>>(std::stof(expression));
+    } else if (expression == "true") {
+      return std::make_unique<Bool>(true);
+    } else if (expression == "false") {
+      return std::make_unique<Bool>(false);
+    } else if (expression.contains('.'))
+      return std::make_unique<Float>(std::stof(expression));
+    else
+      return std::make_unique<Int>(std::stoi(expression));
   }
 
   auto leftNode = makeTree(expression.substr(0, position), vars);
