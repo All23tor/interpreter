@@ -107,11 +107,22 @@ OperatorInfo lowestOperator(std::string_view expr) {
   auto opPosition = std::string::npos;
 
   bool expectUnary = true;
+  int parenthesis = 0;
 
   for (size_t i = 0; i < expr.length(); ++i) {
     char c = expr[i];
 
-    if (!isOperator(c)) {
+    if (c == '(') {
+      ++parenthesis;
+      expectUnary = true;
+      continue;
+    } else if (c == ')') {
+      --parenthesis;
+      expectUnary = false;
+      continue;
+    }
+
+    if (!isOperator(c) || parenthesis != 0) {
       expectUnary = false;
       continue;
     }
@@ -130,8 +141,28 @@ OperatorInfo lowestOperator(std::string_view expr) {
   return OperatorInfo{currentOp, opPosition};
 };
 
+bool balancedParenthesis(std::string& expression) {
+  int depth = 0;
+  for (std::size_t i = 0; i < expression.length() - 1; ++i) {
+    char c = expression[i];
+    if (c == '(')
+      ++depth;
+    else if (c == ')')
+      --depth;
+    if (depth == 0)
+      return false;
+  }
+  return true;
+}
+
 std::unique_ptr<Node> makeTree(std::string&& expression,
                                std::set<std::string>& vars) {
+  while (expression.front() == '(' && expression.back() == ')')
+    if (balancedParenthesis(expression))
+      expression = expression.substr(1, expression.length() - 2);
+    else
+      break;
+
   auto [op, position] = lowestOperator(expression);
 
   if (op == '\0') {
