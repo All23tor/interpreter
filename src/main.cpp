@@ -28,7 +28,11 @@ int main() {
   try {
     auto [tree, variables] = parseExpression(std::move(expression));
     Context context = makeContext(variables);
-    std::cout << tree->evaluate(context) << '\n';
+    std::visit(
+        [](auto&& arg) {
+          std::cout << std::boolalpha << arg << '\n';
+        },
+        tree->evaluate(context));
   } catch (...) {
     std::cerr << "Wrong syntax\n";
     return -1;

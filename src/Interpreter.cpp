@@ -1,12 +1,16 @@
 #include "Interpreter.hpp"
+#include <type_traits>
 
 namespace {
+template <class ValueType>
+requires std::is_constructible_v<Value, ValueType>
 struct Number final : public Node {
-  const float number;
+  const ValueType number;
 
-  Number(float _number) : number{_number} {}
+  Number(const ValueType& _number) : number{_number} {}
+  Number(ValueType&& _number) : number{std::move(_number)} {}
   ~Number() override = default;
-  float evaluate(const Context&) const override {
+  Value evaluate(const Context&) const override {
     return number;
   }
 };
@@ -16,12 +20,12 @@ struct Variable final : public Node {
 
   Variable(std::string _name) : name{std::move(_name)} {}
   ~Variable() override = default;
-  float evaluate(const Context& context) const override {
+  Value evaluate(const Context& context) const override {
     return context.at(name);
   }
 };
 
-template <float (*Func)(float, float)>
+template <auto Visitor>
 struct Operation final : public Node {
   const std::unique_ptr<Node> left;
   const std::unique_ptr<Node> right;
@@ -30,36 +34,37 @@ struct Operation final : public Node {
       left(std::move(_left)),
       right(std::move(_right)) {}
   virtual ~Operation() override = default;
-  float evaluate(const Context& context) const override {
-    return Func(left->evaluate(context), right->evaluate(context));
+  Value evaluate(const Context& context) const override {
+    return std::visit(Visitor, left->evaluate(context),
+                      right->evaluate(context));
   }
 };
 
-using Or = Operation<[](float a, float b) -> float {
+using Or = Operation<[](auto&& a, auto&& b) -> Value {
   return a || b;
 }>;
-using And = Operation<[](float a, float b) -> float {
+using And = Operation<[](auto&& a, auto&& b) -> Value {
   return a && b;
 }>;
-using More = Operation<[](float a, float b) -> float {
+using More = Operation<[](auto&& a, auto&& b) -> Value {
   return (a > b);
 }>;
-using Less = Operation<[](float a, float b) -> float {
+using Less = Operation<[](auto&& a, auto&& b) -> Value {
   return a < b;
 }>;
-using Equals = Operation<[](float a, float b) -> float {
+using Equals = Operation<[](auto&& a, auto&& b) -> Value {
   return a == b;
 }>;
-using Plus = Operation<[](float a, float b) {
+using Plus = Operation<[](auto&& a, auto&& b) -> Value {
   return a + b;
 }>;
-using Minus = Operation<[](float a, float b) {
+using Minus = Operation<[](auto&& a, auto&& b) -> Value {
   return a - b;
 }>;
-using Times = Operation<[](float a, float b) {
+using Times = Operation<[](auto&& a, auto&& b) -> Value {
   return a * b;
 }>;
-using Over = Operation<[](float a, float b) {
+using Over = Operation<[](auto&& a, auto&& b) -> Value {
   return a / b;
 }>;
 
@@ -171,7 +176,7 @@ std::unique_ptr<Node> makeTree(std::string&& expression,
       vars.insert(varName);
       return std::make_unique<Variable>(std::move(varName));
     }
-    return std::make_unique<Number>(std::stof(expression));
+    return std::make_unique<Number<float>>(std::stof(expression));
   }
 
   auto leftNode = makeTree(expression.substr(0, position), vars);
