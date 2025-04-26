@@ -103,12 +103,7 @@ bool isLower(char op1, char op2) {
   return getPrecedence(op1) <= getPrecedence(op2);
 }
 
-struct OperatorInfo {
-  char op;
-  size_t position;
-};
-
-OperatorInfo lowestOperator(std::string_view expr) {
+std::size_t findLowest(std::string_view expr) {
   char currentOp = '\0';
   auto opPosition = std::string::npos;
 
@@ -144,7 +139,7 @@ OperatorInfo lowestOperator(std::string_view expr) {
     expectUnary = true;
   }
 
-  return OperatorInfo{currentOp, opPosition};
+  return opPosition;
 };
 
 bool balancedParenthesis(std::string& expression) {
@@ -169,27 +164,27 @@ std::unique_ptr<Node> makeTree(std::string&& expression,
     else
       break;
 
-  auto [op, position] = lowestOperator(expression);
+  auto opPos = findLowest(expression);
 
-  if (op == '\0') {
+  if (opPos == std::string::npos) {
     if (expression.front() == '$') {
       auto varName = expression.substr(1);
       vars.insert(varName);
       return std::make_unique<Variable>(std::move(varName));
-    } else if (expression == "true") {
+    } else if (expression == "true")
       return std::make_unique<Bool>(true);
-    } else if (expression == "false") {
+    else if (expression == "false")
       return std::make_unique<Bool>(false);
-    } else if (expression.contains('.'))
+    else if (expression.contains('.'))
       return std::make_unique<Float>(std::stof(expression));
     else
       return std::make_unique<Int>(std::stoi(expression));
   }
 
-  auto leftNode = makeTree(expression.substr(0, position), vars);
-  auto rightNode = makeTree(expression.substr(position + 1), vars);
+  auto leftNode = makeTree(expression.substr(0, opPos), vars);
+  auto rightNode = makeTree(expression.substr(opPos + 1), vars);
 
-  switch (op) {
+  switch (expression[opPos]) {
   case '|':
     return std::make_unique<Or>(std::move(leftNode), std::move(rightNode));
   case '&':
@@ -216,7 +211,6 @@ std::unique_ptr<Node> makeTree(std::string&& expression,
 
 ParseResult parseExpression(std::string expression) {
   std::erase(expression, ' ');
-
   std::set<std::string> variables;
   auto tree = makeTree(std::move(expression), variables);
   return {std::move(tree), std::move(variables)};
