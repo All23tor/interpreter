@@ -85,19 +85,16 @@ bool isLower(char op1, char op2) {
     case '&':
       return 2;
     case '>':
-      return 3;
     case '<':
-      return 4;
+      return 3;
     case '=':
-      return 5;
+      return 4;
     case '+':
-      return 6;
     case '-':
-      return 7;
-    case '*':
-      return 8;
+      return 5;
     case '/':
-      return 9;
+    case '*':
+      return 6;
     default:
       return 0;
     }
