@@ -26,7 +26,7 @@ int main() {
     std::getline(std::cin, expression);
 
   try {
-    auto [tree, variables] = parseExpression(expression);
+    auto [tree, variables] = parseExpression(std::move(expression));
     Context context = makeContext(variables);
     std::cout << tree->evaluate(context) << '\n';
   } catch (...) {

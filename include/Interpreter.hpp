@@ -15,4 +15,4 @@ struct ParseResult {
   std::set<std::string> usedVariables;
 };
 
-ParseResult parseExpression(const std::string&);
+ParseResult parseExpression(std::string);

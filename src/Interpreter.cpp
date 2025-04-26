@@ -130,9 +130,8 @@ OperatorInfo lowestOperator(std::string_view expr) {
   return OperatorInfo{currentOp, opPosition};
 };
 
-std::unique_ptr<Node> makeTree(std::string expression,
+std::unique_ptr<Node> makeTree(std::string&& expression,
                                std::set<std::string>& vars) {
-  std::erase(expression, ' ');
   auto [op, position] = lowestOperator(expression);
 
   if (op == '\0') {
@@ -172,8 +171,10 @@ std::unique_ptr<Node> makeTree(std::string expression,
 }
 } // namespace
 
-ParseResult parseExpression(const std::string& str) {
+ParseResult parseExpression(std::string expression) {
+  std::erase(expression, ' ');
+
   std::set<std::string> variables;
-  auto tree = makeTree(str, variables);
+  auto tree = makeTree(std::move(expression), variables);
   return {std::move(tree), std::move(variables)};
 }
