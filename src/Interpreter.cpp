@@ -51,7 +51,7 @@ using Or = Operation<[](auto&& a, auto&& b) -> Value {
   constexpr bool aStr = std::is_same_v<A, std::string>;
   constexpr bool bStr = std::is_same_v<B, std::string>;
   if constexpr (aStr || bStr)
-    throw;
+    throw std::bad_variant_access();
   else
     return a || b;
 }>;
@@ -61,7 +61,7 @@ using And = Operation<[](auto&& a, auto&& b) -> Value {
   constexpr bool aStr = std::is_same_v<A, std::string>;
   constexpr bool bStr = std::is_same_v<B, std::string>;
   if constexpr (aStr || bStr)
-    throw;
+    throw std::bad_variant_access();
   else
     return a && b;
 }>;
@@ -71,7 +71,7 @@ using More = Operation<[](auto&& a, auto&& b) -> Value {
   constexpr bool aStr = std::is_same_v<A, std::string>;
   constexpr bool bStr = std::is_same_v<B, std::string>;
   if constexpr (aStr != bStr)
-    throw;
+    throw std::bad_variant_access();
   else
     return (a > b);
 }>;
@@ -81,7 +81,7 @@ using Less = Operation<[](auto&& a, auto&& b) -> Value {
   constexpr bool aStr = std::is_same_v<A, std::string>;
   constexpr bool bStr = std::is_same_v<B, std::string>;
   if constexpr (aStr != bStr)
-    throw;
+    throw std::bad_variant_access();
   else
     return a < b;
 }>;
@@ -91,7 +91,7 @@ using Equals = Operation<[](auto&& a, auto&& b) -> Value {
   constexpr bool aStr = std::is_same_v<A, std::string>;
   constexpr bool bStr = std::is_same_v<B, std::string>;
   if constexpr (aStr != bStr)
-    throw;
+    throw std::bad_variant_access();
   else
     return a == b;
 }>;
@@ -101,7 +101,7 @@ using Plus = Operation<[](auto&& a, auto&& b) -> Value {
   constexpr bool aStr = std::is_same_v<A, std::string>;
   constexpr bool bStr = std::is_same_v<B, std::string>;
   if constexpr (aStr != bStr)
-    throw;
+    throw std::bad_variant_access();
   else
     return a + b;
 }>;
@@ -111,7 +111,7 @@ using Minus = Operation<[](auto&& a, auto&& b) -> Value {
   constexpr bool aStr = std::is_same_v<A, std::string>;
   constexpr bool bStr = std::is_same_v<B, std::string>;
   if constexpr (aStr || bStr)
-    throw;
+    throw std::bad_variant_access();
   else
     return a - b;
 }>;
@@ -121,7 +121,7 @@ using Times = Operation<[](auto&& a, auto&& b) -> Value {
   constexpr bool aStr = std::is_same_v<A, std::string>;
   constexpr bool bStr = std::is_same_v<B, std::string>;
   if constexpr (aStr || bStr)
-    throw;
+    throw std::bad_variant_access();
   else
     return a * b;
 }>;
@@ -131,7 +131,7 @@ using Over = Operation<[](auto&& a, auto&& b) -> Value {
   constexpr bool aStr = std::is_same_v<A, std::string>;
   constexpr bool bStr = std::is_same_v<B, std::string>;
   if constexpr (aStr || bStr)
-    throw;
+    throw std::bad_variant_access();
   else
     return a / b;
 }>;
