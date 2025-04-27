@@ -30,10 +30,10 @@ struct Operation final : public Node {
     else
       throw std::bad_variant_access();
   };
-  const std::unique_ptr<Node> left;
-  const std::unique_ptr<Node> right;
+  const NodePtr left;
+  const NodePtr right;
 
-  Operation(std::unique_ptr<Node>&& _left, std::unique_ptr<Node>&& _right) :
+  Operation(NodePtr&& _left, NodePtr&& _right) :
       left(std::move(_left)),
       right(std::move(_right)) {}
   virtual ~Operation() override = default;
@@ -122,7 +122,6 @@ bool balancedParenthesis(std::string& expression) {
   return true;
 }
 
-using NodePtr = std::unique_ptr<Node>;
 using NodeFactory = NodePtr (*)(NodePtr&&, NodePtr&&);
 template <typename T>
 constexpr auto makeOpFactory() {
@@ -146,8 +145,7 @@ static inline const auto operatorFactories = []() {
   return table;
 }();
 
-std::unique_ptr<Node> makeTree(std::string&& expression,
-                               std::set<std::string>& vars) {
+NodePtr makeTree(std::string&& expression, std::set<std::string>& vars) {
   while (expression.front() == '(' && expression.back() == ')')
     if (balancedParenthesis(expression))
       expression = expression.substr(1, expression.length() - 2);

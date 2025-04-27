@@ -11,9 +11,10 @@ struct Node {
   virtual ~Node() = default;
   virtual Value evaluate(const Context&) const = 0;
 };
+using NodePtr = std::unique_ptr<Node>;
 
 struct ParseResult {
-  std::unique_ptr<Node> tree;
+  NodePtr tree;
   std::set<std::string> usedVariables;
 };
 
