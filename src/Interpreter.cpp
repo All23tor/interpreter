@@ -1,24 +1,16 @@
 #include "Interpreter.hpp"
-#include <type_traits>
 
 namespace {
-template <class ValueType>
-requires std::is_constructible_v<Value, ValueType>
 struct Number final : public Node {
-  const ValueType number;
+  const Value number;
 
-  Number(const ValueType& _number) : number{_number} {}
-  Number(ValueType&& _number) : number{std::move(_number)} {}
+  Number(const Value& _number) : number{_number} {}
+  Number(Value&& _number) : number{std::move(_number)} {}
   ~Number() override = default;
   Value evaluate(const Context&) const override {
     return number;
   }
 };
-
-using Bool = Number<bool>;
-using Int = Number<int>;
-using Float = Number<float>;
-using String = Number<std::string>;
 
 struct Variable final : public Node {
   const std::string name;
@@ -30,8 +22,14 @@ struct Variable final : public Node {
   }
 };
 
-template <auto Visitor>
+template <class Func>
 struct Operation final : public Node {
+  static constexpr auto Visitor = [](auto&& a, auto&& b) -> Value {
+    if constexpr (requires { Func{}(a, b); })
+      return Func{}(a, b);
+    else
+      throw std::bad_variant_access();
+  };
   const std::unique_ptr<Node> left;
   const std::unique_ptr<Node> right;
 
@@ -40,105 +38,15 @@ struct Operation final : public Node {
       right(std::move(_right)) {}
   virtual ~Operation() override = default;
   Value evaluate(const Context& context) const override {
-    return std::visit(Visitor, left->evaluate(context),
-                      right->evaluate(context));
+    auto lhs = left->evaluate(context);
+    auto rhs = right->evaluate(context);
+    return std::visit(Visitor, std::move(lhs), std::move(rhs));
   }
 };
 
-using Or = Operation<[](auto&& a, auto&& b) -> Value {
-  using A = std::remove_cvref_t<decltype(a)>;
-  using B = std::remove_cvref_t<decltype(b)>;
-  constexpr bool aStr = std::is_same_v<A, std::string>;
-  constexpr bool bStr = std::is_same_v<B, std::string>;
-  if constexpr (aStr || bStr)
-    throw std::bad_variant_access();
-  else
-    return a || b;
-}>;
-using And = Operation<[](auto&& a, auto&& b) -> Value {
-  using A = std::remove_cvref_t<decltype(a)>;
-  using B = std::remove_cvref_t<decltype(b)>;
-  constexpr bool aStr = std::is_same_v<A, std::string>;
-  constexpr bool bStr = std::is_same_v<B, std::string>;
-  if constexpr (aStr || bStr)
-    throw std::bad_variant_access();
-  else
-    return a && b;
-}>;
-using More = Operation<[](auto&& a, auto&& b) -> Value {
-  using A = std::remove_cvref_t<decltype(a)>;
-  using B = std::remove_cvref_t<decltype(b)>;
-  constexpr bool aStr = std::is_same_v<A, std::string>;
-  constexpr bool bStr = std::is_same_v<B, std::string>;
-  if constexpr (aStr != bStr)
-    throw std::bad_variant_access();
-  else
-    return (a > b);
-}>;
-using Less = Operation<[](auto&& a, auto&& b) -> Value {
-  using A = std::remove_cvref_t<decltype(a)>;
-  using B = std::remove_cvref_t<decltype(b)>;
-  constexpr bool aStr = std::is_same_v<A, std::string>;
-  constexpr bool bStr = std::is_same_v<B, std::string>;
-  if constexpr (aStr != bStr)
-    throw std::bad_variant_access();
-  else
-    return a < b;
-}>;
-using Equals = Operation<[](auto&& a, auto&& b) -> Value {
-  using A = std::remove_cvref_t<decltype(a)>;
-  using B = std::remove_cvref_t<decltype(b)>;
-  constexpr bool aStr = std::is_same_v<A, std::string>;
-  constexpr bool bStr = std::is_same_v<B, std::string>;
-  if constexpr (aStr != bStr)
-    throw std::bad_variant_access();
-  else
-    return a == b;
-}>;
-using Plus = Operation<[](auto&& a, auto&& b) -> Value {
-  using A = std::remove_cvref_t<decltype(a)>;
-  using B = std::remove_cvref_t<decltype(b)>;
-  constexpr bool aStr = std::is_same_v<A, std::string>;
-  constexpr bool bStr = std::is_same_v<B, std::string>;
-  if constexpr (aStr != bStr)
-    throw std::bad_variant_access();
-  else
-    return a + b;
-}>;
-using Minus = Operation<[](auto&& a, auto&& b) -> Value {
-  using A = std::remove_cvref_t<decltype(a)>;
-  using B = std::remove_cvref_t<decltype(b)>;
-  constexpr bool aStr = std::is_same_v<A, std::string>;
-  constexpr bool bStr = std::is_same_v<B, std::string>;
-  if constexpr (aStr || bStr)
-    throw std::bad_variant_access();
-  else
-    return a - b;
-}>;
-using Times = Operation<[](auto&& a, auto&& b) -> Value {
-  using A = std::remove_cvref_t<decltype(a)>;
-  using B = std::remove_cvref_t<decltype(b)>;
-  constexpr bool aStr = std::is_same_v<A, std::string>;
-  constexpr bool bStr = std::is_same_v<B, std::string>;
-  if constexpr (aStr || bStr)
-    throw std::bad_variant_access();
-  else
-    return a * b;
-}>;
-using Over = Operation<[](auto&& a, auto&& b) -> Value {
-  using A = std::remove_cvref_t<decltype(a)>;
-  using B = std::remove_cvref_t<decltype(b)>;
-  constexpr bool aStr = std::is_same_v<A, std::string>;
-  constexpr bool bStr = std::is_same_v<B, std::string>;
-  if constexpr (aStr || bStr)
-    throw std::bad_variant_access();
-  else
-    return a / b;
-}>;
-
 static bool isOperator(char c) {
   return c == '+' || c == '-' || c == '*' || c == '/' || c == '|' || c == '&' ||
-         c == '>' || c == '<' || c == '=';
+         c == '>' || c == '<' || c == '=' || c == '%';
 }
 
 bool isLower(char op1, char op2) {
@@ -158,6 +66,7 @@ bool isLower(char op1, char op2) {
       return 5;
     case '/':
     case '*':
+    case '%':
       return 6;
     default:
       return 0;
@@ -180,27 +89,20 @@ std::size_t findLowest(std::string_view expr) {
     if (c == '(') {
       ++parenthesis;
       expectUnary = true;
-      continue;
     } else if (c == ')') {
       --parenthesis;
       expectUnary = false;
-      continue;
-    }
-
-    if (!isOperator(c) || parenthesis != 0) {
+    } else if (isOperator(c) && parenthesis == 0) {
+      if (c == '-' && expectUnary)
+        continue;
+      if (!currentOp || isLower(c, currentOp)) {
+        currentOp = c;
+        opPosition = i;
+      }
+      expectUnary = true;
+    } else {
       expectUnary = false;
-      continue;
     }
-
-    if (c == '-' && expectUnary)
-      continue;
-
-    if (!currentOp || isLower(c, currentOp)) {
-      currentOp = c;
-      opPosition = i;
-    }
-
-    expectUnary = true;
   }
 
   return opPosition;
@@ -220,6 +122,30 @@ bool balancedParenthesis(std::string& expression) {
   return true;
 }
 
+using NodePtr = std::unique_ptr<Node>;
+using NodeFactory = NodePtr (*)(NodePtr&&, NodePtr&&);
+template <typename T>
+constexpr auto makeOpFactory() {
+  return [](NodePtr&& left, NodePtr&& right) -> NodePtr {
+    return std::make_unique<Operation<T>>(std::move(left), std::move(right));
+  };
+}
+
+static inline const auto operatorFactories = []() {
+  std::map<char, NodeFactory> table;
+  table['|'] = makeOpFactory<std::logical_or<>>();
+  table['&'] = makeOpFactory<std::logical_and<>>();
+  table['>'] = makeOpFactory<std::greater<>>();
+  table['<'] = makeOpFactory<std::less<>>();
+  table['='] = makeOpFactory<std::equal_to<>>();
+  table['+'] = makeOpFactory<std::plus<>>();
+  table['-'] = makeOpFactory<std::minus<>>();
+  table['*'] = makeOpFactory<std::multiplies<>>();
+  table['/'] = makeOpFactory<std::divides<>>();
+  table['%'] = makeOpFactory<std::modulus<>>();
+  return table;
+}();
+
 std::unique_ptr<Node> makeTree(std::string&& expression,
                                std::set<std::string>& vars) {
   while (expression.front() == '(' && expression.back() == ')')
@@ -232,48 +158,30 @@ std::unique_ptr<Node> makeTree(std::string&& expression,
 
   if (opPos == std::string::npos) {
     if (expression.front() == '$') {
-      expression.erase(0, 1);
-      vars.insert(expression);
+      expression.erase(expression.begin());
       return std::make_unique<Variable>(std::move(expression));
-    } else if (expression.front() == '"') {
-      expression.pop_back();
-      expression.erase(0, 1);
-      return std::make_unique<String>(std::move(expression));
-    } else if (expression == "true")
-      return std::make_unique<Bool>(true);
+    }
+
+    Value value;
+    if (expression == "true")
+      value = true;
     else if (expression == "false")
-      return std::make_unique<Bool>(false);
+      value = false;
     else if (expression.contains('.'))
-      return std::make_unique<Float>(std::stof(expression));
+      value = std::stof(expression);
+    else if (expression.front() == '"')
+      value = expression.substr(1, expression.length() - 2);
     else
-      return std::make_unique<Int>(std::stoi(expression));
+      value = std::stoi(expression);
+    return std::make_unique<Number>(std::move(value));
   }
 
   auto leftNode = makeTree(expression.substr(0, opPos), vars);
   auto rightNode = makeTree(expression.substr(opPos + 1), vars);
 
-  switch (expression[opPos]) {
-  case '|':
-    return std::make_unique<Or>(std::move(leftNode), std::move(rightNode));
-  case '&':
-    return std::make_unique<And>(std::move(leftNode), std::move(rightNode));
-  case '>':
-    return std::make_unique<More>(std::move(leftNode), std::move(rightNode));
-  case '<':
-    return std::make_unique<Less>(std::move(leftNode), std::move(rightNode));
-  case '=':
-    return std::make_unique<Equals>(std::move(leftNode), std::move(rightNode));
-  case '+':
-    return std::make_unique<Plus>(std::move(leftNode), std::move(rightNode));
-  case '-':
-    return std::make_unique<Minus>(std::move(leftNode), std::move(rightNode));
-  case '*':
-    return std::make_unique<Times>(std::move(leftNode), std::move(rightNode));
-  case '/':
-    return std::make_unique<Over>(std::move(leftNode), std::move(rightNode));
-  default:
-    return nullptr;
-  }
+  auto op = expression[opPos];
+  NodeFactory factory = operatorFactories.at(op);
+  return factory(std::move(leftNode), std::move(rightNode));
 }
 } // namespace
 
