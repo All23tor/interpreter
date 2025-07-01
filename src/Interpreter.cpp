@@ -20,7 +20,7 @@ struct VariableNode final : public Node {
   virtual Value evaluate(const Context& context) const override final {
     try {
       return context.at(name);
-    } catch (...) {
+    } catch (std::out_of_range& oor) {
       throw name;
     }
   }

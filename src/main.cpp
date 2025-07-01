@@ -3,32 +3,31 @@
 #include <iostream>
 #include <stdexcept>
 
-int main() {
-  std::string expression;
-  while (expression.empty()) {
-    std::clog << "> ";
-    if (!std::getline(std::cin, expression)) {
-      std::cout << '\n';
-      return 0;
+Value force_evaluate(auto&& tree) {
+  Context context;
+
+  while (true)
+    try {
+      return tree->evaluate(context);
+    } catch (std::string& var_name) {
+      std::cout << "$" << var_name << ": ";
+      std::string value;
+      std::cin >> value;
+      context[var_name] = parse_value(value);
     }
+}
+
+void interpret(std::string&& expression) {
+  NodePtr tree;
+
+  try {
+    tree = parseExpression(std::move(expression));
+  } catch (std::invalid_argument& ia) {
+    std::cerr << "Unrecognized value\n";
+    return;
   }
 
   try {
-    auto tree = parseExpression(std::move(expression));
-    Context context;
-
-    Value ans;
-    while (true)
-      try {
-        ans = tree->evaluate(context);
-        break;
-      } catch (std::string& var_name) {
-        std::cout << "\t$" << var_name << ": ";
-        std::string value;
-        std::cin >> value;
-        context[var_name] = parse_value(value);
-      }
-
     std::visit(
         [](auto&& arg) {
           using T = std::remove_cvref_t<decltype(arg)>;
@@ -37,12 +36,21 @@ int main() {
           else
             std::cout << '\t' << std::boolalpha << arg << '\n';
         },
-        ans);
+        force_evaluate(tree));
   } catch (std::bad_variant_access& bva) {
     std::cerr << "Unsuported operator\n";
-    return -1;
-  } catch (std::invalid_argument& ia) {
-    std::cerr << "Unrecognized value\n";
-    return -1;
+    return;
   }
+}
+
+int main() {
+  while (!std::cin.eof()) {
+    std::string expression;
+    std::clog << "> ";
+    std::getline(std::cin, expression);
+    if (expression.empty())
+      continue;
+    interpret(std::move(expression));
+  }
+  std::cout << '\n';
 }
