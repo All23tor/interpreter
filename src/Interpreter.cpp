@@ -38,10 +38,10 @@ struct OperationNode final : public Node {
     else
       throw std::bad_variant_access();
   };
-  const NodePtr left;
-  const NodePtr right;
+  const SyntaxTree left;
+  const SyntaxTree right;
 
-  OperationNode(NodePtr&& _left, NodePtr&& _right) :
+  OperationNode(SyntaxTree&& _left, SyntaxTree&& _right) :
       left(std::move(_left)),
       right(std::move(_right)) {}
   virtual ~OperationNode() override final = default;
@@ -52,10 +52,10 @@ struct OperationNode final : public Node {
   }
 };
 
-using NodeFactory = NodePtr (*)(NodePtr&&, NodePtr&&);
+using NodeFactory = SyntaxTree (*)(SyntaxTree&&, SyntaxTree&&);
 template <typename Func>
 constexpr NodeFactory op_factory =
-    [](NodePtr&& left, NodePtr&& right) -> NodePtr {
+    [](SyntaxTree&& left, SyntaxTree&& right) -> SyntaxTree {
   return std::make_unique<OperationNode<Func>>(std::move(left),
                                                std::move(right));
 };
@@ -127,7 +127,7 @@ bool balanced_parenthesis(std::string_view expression) {
   return true;
 }
 
-NodePtr make_tree(std::string_view expression) {
+SyntaxTree make_tree(std::string_view expression) {
   while (expression.front() == '(' && expression.back() == ')')
     if (balanced_parenthesis(expression))
       expression = expression.substr(1, expression.size() - 2);
@@ -159,7 +159,8 @@ Value parse_value(std::string_view expression) {
   return std::stoi(std::string(expression));
 }
 
-NodePtr parseExpression(std::string expression) {
-  std::erase(expression, ' ');
-  return make_tree(expression);
+SyntaxTree parse_expression(std::string_view expression) {
+  std::string formatted_expression{expression};
+  std::erase(formatted_expression, ' ');
+  return make_tree(formatted_expression);
 }

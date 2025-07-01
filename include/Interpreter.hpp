@@ -10,7 +10,7 @@ struct Node {
   virtual ~Node() = default;
   virtual Value evaluate(const Context&) const = 0;
 };
-using NodePtr = std::unique_ptr<Node>;
+using SyntaxTree = std::unique_ptr<Node>;
 
 Value parse_value(std::string_view);
-NodePtr parseExpression(std::string);
+SyntaxTree parse_expression(std::string_view);

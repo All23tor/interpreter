@@ -3,25 +3,34 @@
 #include <iostream>
 #include <stdexcept>
 
-Value force_evaluate(auto&& tree) {
+Value force_parse(const std::string var_name) {
+  std::string value;
+
+  while (true)
+    try {
+      return parse_value(value);
+    } catch (std::invalid_argument& ia) {
+      std::cout << "$" << var_name << ": ";
+      std::getline(std::cin, value);
+    }
+}
+
+Value force_evaluate(const SyntaxTree& tree) {
   Context context;
 
   while (true)
     try {
       return tree->evaluate(context);
-    } catch (std::string& var_name) {
-      std::cout << "$" << var_name << ": ";
-      std::string value;
-      std::cin >> value;
-      context[var_name] = parse_value(value);
+    } catch (const std::string& var_name) {
+      context[var_name] = force_parse(var_name);
     }
 }
 
-void interpret(std::string&& expression) {
-  NodePtr tree;
+void interpret(std::string_view expression) {
+  SyntaxTree tree;
 
   try {
-    tree = parseExpression(std::move(expression));
+    tree = parse_expression(expression);
   } catch (std::invalid_argument& ia) {
     std::cerr << "Unrecognized value\n";
     return;
@@ -39,18 +48,17 @@ void interpret(std::string&& expression) {
         force_evaluate(tree));
   } catch (std::bad_variant_access& bva) {
     std::cerr << "Unsuported operator\n";
-    return;
   }
 }
 
 int main() {
+  std::string expression;
   while (!std::cin.eof()) {
-    std::string expression;
     std::clog << "> ";
     std::getline(std::cin, expression);
     if (expression.empty())
       continue;
-    interpret(std::move(expression));
+    interpret(expression);
   }
   std::cout << '\n';
 }
