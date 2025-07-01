@@ -1,6 +1,5 @@
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <variant>
 
@@ -13,9 +12,5 @@ struct Node {
 };
 using NodePtr = std::unique_ptr<Node>;
 
-struct ParseResult {
-  NodePtr tree;
-  std::set<std::string> usedVariables;
-};
-
-ParseResult parseExpression(std::string);
+Value parse_value(std::string_view);
+NodePtr parseExpression(std::string);

@@ -1,56 +1,48 @@
 #include "Interpreter.hpp"
 #include <iomanip>
 #include <iostream>
-
-Context makeContext(const std::set<std::string>& variables) {
-  Context context;
-  for (const auto& name : variables) {
-    while (true) {
-      try {
-        std::clog << '\t' << name << ": ";
-        std::string value;
-        std::cin >> value;
-        if (value.front() == '"' && value.length() > 1 && value.back() == '"') {
-          value.pop_back();
-          value.erase(0, 1);
-          context[name] = std::move(value);
-        } else if (value == "true") {
-          context[name] = true;
-        } else if (value == "false") {
-          context[name] = false;
-        } else if (value.contains('.'))
-          context[name] = std::stof(value);
-        else
-          context[name] = std::stoi(value);
-        break;
-      } catch (...) {
-        std::cerr << '\t' << "Wrong assignment\n";
-      }
-    }
-  }
-  return context;
-}
+#include <stdexcept>
 
 int main() {
-  std::clog << "Expression: ";
   std::string expression;
-  while (expression.empty())
-    std::getline(std::cin, expression);
+  while (expression.empty()) {
+    std::clog << "> ";
+    if (!std::getline(std::cin, expression)) {
+      std::cout << '\n';
+      return 0;
+    }
+  }
 
   try {
-    auto [tree, variables] = parseExpression(std::move(expression));
-    Context context = makeContext(variables);
+    auto tree = parseExpression(std::move(expression));
+    Context context;
+
+    Value ans;
+    while (true)
+      try {
+        ans = tree->evaluate(context);
+        break;
+      } catch (std::string& var_name) {
+        std::cout << "\t$" << var_name << ": ";
+        std::string value;
+        std::cin >> value;
+        context[var_name] = parse_value(value);
+      }
+
     std::visit(
         [](auto&& arg) {
           using T = std::remove_cvref_t<decltype(arg)>;
           if constexpr (std::is_same_v<std::string, T>)
-            std::cout << std::quoted(arg) << '\n';
+            std::cout << '\t' << std::quoted(arg) << '\n';
           else
-            std::cout << std::boolalpha << arg << '\n';
+            std::cout << '\t' << std::boolalpha << arg << '\n';
         },
-        tree->evaluate(context));
-  } catch (...) {
-    std::cerr << "Wrong syntax\n";
+        ans);
+  } catch (std::bad_variant_access& bva) {
+    std::cerr << "Unsuported operator\n";
+    return -1;
+  } catch (std::invalid_argument& ia) {
+    std::cerr << "Unrecognized value\n";
     return -1;
   }
 }

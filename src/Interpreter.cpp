@@ -1,30 +1,38 @@
 #include "Interpreter.hpp"
 
 namespace {
-struct Number final : public Node {
-  const Value number;
+struct ValueNode final : public Node {
+  const Value value;
 
-  Number(const Value& _number) : number{_number} {}
-  Number(Value&& _number) : number{std::move(_number)} {}
-  ~Number() override = default;
-  Value evaluate(const Context&) const override {
-    return number;
+  ValueNode(const Value& _value) : value{_value} {}
+  ValueNode(Value&& _value) : value{std::move(_value)} {}
+  virtual ~ValueNode() override final = default;
+  virtual Value evaluate(const Context&) const override final {
+    return value;
   }
 };
 
-struct Variable final : public Node {
+struct VariableNode final : public Node {
   const std::string name;
 
-  Variable(std::string _name) : name{std::move(_name)} {}
-  ~Variable() override = default;
-  Value evaluate(const Context& context) const override {
-    return context.at(name);
+  VariableNode(std::string _name) : name{std::move(_name)} {}
+  virtual ~VariableNode() override final = default;
+  virtual Value evaluate(const Context& context) const override final {
+    try {
+      return context.at(name);
+    } catch (...) {
+      throw name;
+    }
   }
+};
+
+struct UnsuportedOperation : std::runtime_error {
+  using std::runtime_error::runtime_error;
 };
 
 template <class Func>
-struct Operation final : public Node {
-  static constexpr auto Visitor = [](auto&& a, auto&& b) -> Value {
+struct OperationNode final : public Node {
+  static constexpr auto operation = [](auto&& a, auto&& b) -> Value {
     if constexpr (requires { Func{}(a, b); })
       return Func{}(a, b);
     else
@@ -33,82 +41,79 @@ struct Operation final : public Node {
   const NodePtr left;
   const NodePtr right;
 
-  Operation(NodePtr&& _left, NodePtr&& _right) :
+  OperationNode(NodePtr&& _left, NodePtr&& _right) :
       left(std::move(_left)),
       right(std::move(_right)) {}
-  virtual ~Operation() override = default;
-  Value evaluate(const Context& context) const override {
+  virtual ~OperationNode() override final = default;
+  virtual Value evaluate(const Context& context) const override final {
     auto lhs = left->evaluate(context);
     auto rhs = right->evaluate(context);
-    return std::visit(Visitor, std::move(lhs), std::move(rhs));
+    return std::visit(operation, std::move(lhs), std::move(rhs));
   }
 };
 
-static bool isOperator(char c) {
-  return c == '+' || c == '-' || c == '*' || c == '/' || c == '|' || c == '&' ||
-         c == '>' || c == '<' || c == '=' || c == '%';
-}
-
-bool isLower(char op1, char op2) {
-  static constexpr int (*getPrecedence)(char) = [](char op) {
-    switch (op) {
-    case '|':
-      return 1;
-    case '&':
-      return 2;
-    case '>':
-    case '<':
-      return 3;
-    case '=':
-      return 4;
-    case '+':
-    case '-':
-      return 5;
-    case '/':
-    case '*':
-    case '%':
-      return 6;
-    default:
-      return 0;
-    }
-  };
-
-  return getPrecedence(op1) <= getPrecedence(op2);
-}
-
-std::size_t findLowest(std::string_view expr) {
-  char currentOp = '\0';
-  auto opPosition = std::string::npos;
-
-  bool expectUnary = true;
-  int parenthesis = 0;
-
-  for (size_t i = 0; i < expr.length(); ++i) {
-    char c = expr[i];
-
-    if (c == '(') {
-      ++parenthesis;
-      expectUnary = true;
-    } else if (c == ')') {
-      --parenthesis;
-      expectUnary = false;
-    } else if (isOperator(c) && parenthesis == 0) {
-      if (c == '-' && expectUnary)
-        continue;
-      if (!currentOp || isLower(c, currentOp)) {
-        currentOp = c;
-        opPosition = i;
-      }
-      expectUnary = true;
-    } else {
-      expectUnary = false;
-    }
-  }
-
-  return opPosition;
+using NodeFactory = NodePtr (*)(NodePtr&&, NodePtr&&);
+template <typename Func>
+constexpr NodeFactory op_factory =
+    [](NodePtr&& left, NodePtr&& right) -> NodePtr {
+  return std::make_unique<OperationNode<Func>>(std::move(left),
+                                               std::move(right));
 };
 
-bool balancedParenthesis(std::string& expression) {
+struct OperationInfo {
+  std::string_view name;
+  NodeFactory factory;
+};
+
+constexpr std::array<OperationInfo, 13> operations{{
+    {"||", op_factory<std::logical_or<>>},
+    {"&&", op_factory<std::logical_and<>>},
+    {">=", op_factory<std::greater_equal<>>},
+    {"<=", op_factory<std::less_equal<>>},
+    {">", op_factory<std::greater<>>},
+    {"<", op_factory<std::less<>>},
+    {"==", op_factory<std::equal_to<>>},
+    {"!=", op_factory<std::not_equal_to<>>},
+    {"+", op_factory<std::plus<>>},
+    {"-", op_factory<std::minus<>>},
+    {"*", op_factory<std::multiplies<>>},
+    {"/", op_factory<std::divides<>>},
+    {"%", op_factory<std::modulus<>>},
+}};
+
+std::size_t handle_unary_minus(std::string_view expr, std::size_t pos) {
+  if (pos == 0)
+    pos = expr.find("-", 1);
+  while (pos != std::string_view::npos && !std::isalnum(expr[pos - 1]))
+    pos = expr.find("-", pos + 1);
+  return pos;
+}
+
+std::pair<std::size_t, OperationInfo> find_lowest(std::string_view expr) {
+  for (const auto& operation : operations) {
+    auto pos = expr.find(operation.name);
+    if (operation.name == "-")
+      pos = handle_unary_minus(expr, pos);
+
+    if (pos == std::string_view::npos)
+      continue;
+
+    int parenCount = 0;
+    for (char c : expr.substr(0, pos))
+      if (c == ')')
+        parenCount--;
+      else if (c == '(')
+        parenCount++;
+
+    if (parenCount != 0)
+      continue;
+
+    return {pos, operation};
+  }
+  return {std::string_view::npos, {}};
+}
+
+bool balanced_parenthesis(std::string_view expression) {
   int depth = 0;
   for (std::size_t i = 0; i < expression.length() - 1; ++i) {
     char c = expression[i];
@@ -122,70 +127,39 @@ bool balancedParenthesis(std::string& expression) {
   return true;
 }
 
-using NodeFactory = NodePtr (*)(NodePtr&&, NodePtr&&);
-template <typename T>
-constexpr auto makeOpFactory() {
-  return [](NodePtr&& left, NodePtr&& right) -> NodePtr {
-    return std::make_unique<Operation<T>>(std::move(left), std::move(right));
-  };
-}
-
-static inline const auto operatorFactories = []() {
-  std::map<char, NodeFactory> table;
-  table['|'] = makeOpFactory<std::logical_or<>>();
-  table['&'] = makeOpFactory<std::logical_and<>>();
-  table['>'] = makeOpFactory<std::greater<>>();
-  table['<'] = makeOpFactory<std::less<>>();
-  table['='] = makeOpFactory<std::equal_to<>>();
-  table['+'] = makeOpFactory<std::plus<>>();
-  table['-'] = makeOpFactory<std::minus<>>();
-  table['*'] = makeOpFactory<std::multiplies<>>();
-  table['/'] = makeOpFactory<std::divides<>>();
-  table['%'] = makeOpFactory<std::modulus<>>();
-  return table;
-}();
-
-NodePtr makeTree(std::string&& expression, std::set<std::string>& vars) {
+NodePtr make_tree(std::string_view expression) {
   while (expression.front() == '(' && expression.back() == ')')
-    if (balancedParenthesis(expression))
-      expression = expression.substr(1, expression.length() - 2);
+    if (balanced_parenthesis(expression))
+      expression = expression.substr(1, expression.size() - 2);
     else
       break;
 
-  auto opPos = findLowest(expression);
-
-  if (opPos == std::string::npos) {
-    if (expression.front() == '$') {
-      expression.erase(expression.begin());
-      return std::make_unique<Variable>(std::move(expression));
-    }
-
-    Value value;
-    if (expression == "true")
-      value = true;
-    else if (expression == "false")
-      value = false;
-    else if (expression.contains('.'))
-      value = std::stof(expression);
-    else if (expression.front() == '"')
-      value = expression.substr(1, expression.length() - 2);
-    else
-      value = std::stoi(expression);
-    return std::make_unique<Number>(std::move(value));
+  auto [pos, op] = find_lowest(expression);
+  if (pos == std::string::npos) {
+    if (expression.front() == '$')
+      return std::make_unique<VariableNode>(std::string(expression.substr(1)));
+    return std::make_unique<ValueNode>(parse_value(std::move(expression)));
   }
 
-  auto leftNode = makeTree(expression.substr(0, opPos), vars);
-  auto rightNode = makeTree(expression.substr(opPos + 1), vars);
-
-  auto op = expression[opPos];
-  NodeFactory factory = operatorFactories.at(op);
-  return factory(std::move(leftNode), std::move(rightNode));
+  auto left_tree = make_tree(expression.substr(0, pos));
+  auto right_tree = make_tree(expression.substr(pos + op.name.size()));
+  return op.factory(std::move(left_tree), std::move(right_tree));
 }
 } // namespace
 
-ParseResult parseExpression(std::string expression) {
+Value parse_value(std::string_view expression) {
+  if (expression == "true")
+    return true;
+  if (expression == "false")
+    return false;
+  if (expression.contains('.'))
+    return std::stof(std::string(expression));
+  if (expression.front() == '"')
+    return std::string(expression.substr(1, expression.size() - 2));
+  return std::stoi(std::string(expression));
+}
+
+NodePtr parseExpression(std::string expression) {
   std::erase(expression, ' ');
-  std::set<std::string> variables;
-  auto tree = makeTree(std::move(expression), variables);
-  return {std::move(tree), std::move(variables)};
+  return make_tree(expression);
 }
