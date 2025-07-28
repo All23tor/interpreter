@@ -1,7 +1,6 @@
 #include "Interpreter.hpp"
 #include <iomanip>
 #include <iostream>
-#include <stdexcept>
 
 Value force_parse(const std::string var_name) {
   std::string value;

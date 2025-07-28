@@ -1,4 +1,5 @@
 #include "Interpreter.hpp"
+#include <array>
 
 namespace {
 struct ValueNode final : public Node {
