@@ -37,14 +37,14 @@ void interpret(std::string_view expression) {
 
   try {
     std::visit(
-        [](auto&& arg) {
-          using T = std::remove_cvref_t<decltype(arg)>;
-          if constexpr (std::is_same_v<std::string, T>)
-            std::cout << '\t' << std::quoted(arg) << '\n';
-          else
-            std::cout << '\t' << std::boolalpha << arg << '\n';
-        },
-        force_evaluate(tree));
+      [](auto&& arg) {
+        using T = std::remove_cvref_t<decltype(arg)>;
+        if constexpr (std::is_same_v<std::string, T>)
+          std::cout << '\t' << std::quoted(arg) << '\n';
+        else
+          std::cout << '\t' << std::boolalpha << arg << '\n';
+      },
+      force_evaluate(tree));
   } catch (std::bad_variant_access& bva) {
     std::cerr << "Unsuported operator\n";
   }

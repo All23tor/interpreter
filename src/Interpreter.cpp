@@ -43,8 +43,8 @@ struct OperationNode final : public Node {
   const SyntaxTree right;
 
   OperationNode(SyntaxTree&& _left, SyntaxTree&& _right) :
-      left(std::move(_left)),
-      right(std::move(_right)) {}
+    left(std::move(_left)),
+    right(std::move(_right)) {}
   virtual ~OperationNode() override final = default;
   virtual Value evaluate(const Context& context) const override final {
     auto lhs = left->evaluate(context);
@@ -56,7 +56,7 @@ struct OperationNode final : public Node {
 using NodeFactory = SyntaxTree (*)(SyntaxTree&&, SyntaxTree&&);
 template <typename Func>
 constexpr NodeFactory op_factory =
-    [](SyntaxTree&& left, SyntaxTree&& right) -> SyntaxTree {
+  [](SyntaxTree&& left, SyntaxTree&& right) -> SyntaxTree {
   return std::make_unique<OperationNode<Func>>(std::move(left),
                                                std::move(right));
 };
@@ -67,19 +67,19 @@ struct OperationInfo {
 };
 
 constexpr std::array<OperationInfo, 13> operations{{
-    {"||", op_factory<std::logical_or<>>},
-    {"&&", op_factory<std::logical_and<>>},
-    {">=", op_factory<std::greater_equal<>>},
-    {"<=", op_factory<std::less_equal<>>},
-    {">", op_factory<std::greater<>>},
-    {"<", op_factory<std::less<>>},
-    {"==", op_factory<std::equal_to<>>},
-    {"!=", op_factory<std::not_equal_to<>>},
-    {"+", op_factory<std::plus<>>},
-    {"-", op_factory<std::minus<>>},
-    {"*", op_factory<std::multiplies<>>},
-    {"/", op_factory<std::divides<>>},
-    {"%", op_factory<std::modulus<>>},
+  {"||", op_factory<std::logical_or<>>},
+  {"&&", op_factory<std::logical_and<>>},
+  {">=", op_factory<std::greater_equal<>>},
+  {"<=", op_factory<std::less_equal<>>},
+  {">", op_factory<std::greater<>>},
+  {"<", op_factory<std::less<>>},
+  {"==", op_factory<std::equal_to<>>},
+  {"!=", op_factory<std::not_equal_to<>>},
+  {"+", op_factory<std::plus<>>},
+  {"-", op_factory<std::minus<>>},
+  {"*", op_factory<std::multiplies<>>},
+  {"/", op_factory<std::divides<>>},
+  {"%", op_factory<std::modulus<>>},
 }};
 
 std::size_t handle_unary_minus(std::string_view expr, std::size_t pos) {
