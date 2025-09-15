@@ -45,8 +45,8 @@ void interpret(std::string_view expression) {
           std::cout << '\t' << std::boolalpha << arg << '\n';
       },
       force_evaluate(tree));
-  } catch (std::bad_variant_access& bva) {
-    std::cerr << "Unsuported operator\n";
+  } catch (std::exception& e) {
+    std::cerr << e.what() << '\n';
   }
 }
 

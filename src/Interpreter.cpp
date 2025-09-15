@@ -1,5 +1,9 @@
 #include "Interpreter.hpp"
+#include <algorithm>
 #include <array>
+#include <functional>
+#include <string_view>
+#include <utility>
 
 namespace {
 struct ValueNode final : public Node {
@@ -27,9 +31,8 @@ struct VariableNode final : public Node {
   }
 };
 
-struct UnsuportedOperation : std::runtime_error {
-  using std::runtime_error::runtime_error;
-};
+template <class T1, class T2, class F>
+struct OperationException;
 
 template <class Func>
 struct OperationNode final : public Node {
@@ -37,7 +40,10 @@ struct OperationNode final : public Node {
     if constexpr (requires { Func{}(a, b); })
       return Func{}(a, b);
     else
-      throw std::bad_variant_access();
+      throw OperationException<
+        std::remove_cvref_t<decltype(a)>,
+        std::remove_cvref_t<decltype(b)>,
+        Func>{};
   };
   const SyntaxTree left;
   const SyntaxTree right;
@@ -57,8 +63,9 @@ using NodeFactory = SyntaxTree (*)(SyntaxTree&&, SyntaxTree&&);
 template <typename Func>
 constexpr NodeFactory op_factory =
   [](SyntaxTree&& left, SyntaxTree&& right) -> SyntaxTree {
-  return std::make_unique<OperationNode<Func>>(std::move(left),
-                                               std::move(right));
+  return std::make_unique<OperationNode<Func>>(
+    std::move(left), std::move(right)
+  );
 };
 
 struct OperationInfo {
@@ -66,21 +73,126 @@ struct OperationInfo {
   NodeFactory factory;
 };
 
-constexpr std::array<OperationInfo, 13> operations{{
-  {"||", op_factory<std::logical_or<>>},
-  {"&&", op_factory<std::logical_and<>>},
-  {">=", op_factory<std::greater_equal<>>},
-  {"<=", op_factory<std::less_equal<>>},
-  {">", op_factory<std::greater<>>},
-  {"<", op_factory<std::less<>>},
-  {"==", op_factory<std::equal_to<>>},
-  {"!=", op_factory<std::not_equal_to<>>},
-  {"+", op_factory<std::plus<>>},
-  {"-", op_factory<std::minus<>>},
-  {"*", op_factory<std::multiplies<>>},
-  {"/", op_factory<std::divides<>>},
-  {"%", op_factory<std::modulus<>>},
-}};
+template <auto N>
+struct string_literal {
+  constexpr string_literal(const char (&str)[N]) {
+    std::copy_n(str, N, value);
+  }
+  char value[N];
+};
+
+template <class T, string_literal S>
+struct type_name {
+  using type = T;
+  static constexpr std::string_view value = S.value;
+};
+
+using OPERATORS = std::tuple<
+  type_name<std::logical_or<>, "||">,
+  type_name<std::logical_and<>, "&&">,
+  type_name<std::greater_equal<>, ">=">,
+  type_name<std::less_equal<>, "<=">,
+  type_name<std::greater<>, ">">,
+  type_name<std::less<>, "<">,
+  type_name<std::equal_to<>, "==">,
+  type_name<std::not_equal_to<>, "!=">,
+  type_name<std::plus<>, "+">,
+  type_name<std::minus<>, "-">,
+  type_name<std::multiplies<>, "*">,
+  type_name<std::divides<>, "/">,
+  type_name<std::modulus<>, "%">>;
+
+template <class T, class... Ts>
+struct find_literal;
+template <class T>
+struct find_literal<T> {};
+template <class T, class H, class... Ts>
+requires std::same_as<T, typename H::type>
+struct find_literal<T, H, Ts...> {
+  static constexpr std::string_view value = H::value;
+};
+template <class T, class H, class... Ts>
+struct find_literal<T, H, Ts...> {
+  static constexpr std::string_view value = find_literal<T, Ts...>::value;
+};
+template <class T, class... Ts>
+struct find_literal<T, std::tuple<Ts...>> {
+  static constexpr auto value = find_literal<T, Ts...>::value;
+};
+
+static constexpr std::array<OperationInfo, 13> operations = []() {
+  static constexpr auto nth_op_info =
+    []<std::size_t Idx = 0>(this auto nth_op_info, int idx) constexpr {
+      using T = std::tuple_element_t<Idx, OPERATORS>;
+      if (Idx == idx)
+        return OperationInfo{T::value, op_factory<typename T::type>};
+      else if constexpr (Idx + 1 != std::tuple_size_v<OPERATORS>)
+        return nth_op_info.template operator()<Idx + 1>(idx);
+
+      std::unreachable();
+    };
+
+  std::array<OperationInfo, 13> operations;
+  for (int i = 0; i < std::tuple_size_v<OPERATORS>; i++)
+    operations[i] = nth_op_info(i);
+  return operations;
+}();
+
+template <class T1, class T2, class F>
+struct OperationException : std::exception {
+  template <const std::string_view&... views>
+  struct concat_impl {
+    static constexpr auto arr = [] {
+      constexpr std::size_t len = (views.size() + ... + 0);
+      std::array<char, len + 1> arr{};
+      auto append = [i = 0, &arr](auto const& s) mutable {
+        for (auto c : s)
+          arr[i++] = c;
+      };
+      (append(views), ...);
+      arr[len] = 0;
+      return arr;
+    }();
+
+    static constexpr std::string_view value{arr.data(), arr.size() - 1};
+  };
+  template <const std::string_view&... views>
+  static constexpr auto concat = concat_impl<views...>::value;
+
+  static constexpr std::array<std::string_view, std::variant_size_v<Value>>
+    VALUE_NAMES = {"bool", "int", "float", "string"};
+
+  template <typename T, typename V>
+  struct get_index;
+
+  template <class T>
+  struct tag {};
+  template <typename T, typename... Ts>
+  struct get_index<T, std::variant<Ts...>> {
+    static constexpr std::size_t value =
+      std::variant<tag<Ts>...>(tag<T>{}).index();
+  };
+
+  static constexpr std::string_view TYPES = "Types ";
+  static constexpr std::size_t T1_IDX = get_index<T1, Value>::value;
+  static constexpr std::string_view AND = " and ";
+  static constexpr std::size_t T2_IDX = get_index<T2, Value>::value;
+  static constexpr std::string_view UNSUPPORTED_FOR_OPERATOR =
+    " unsupported for operator ";
+  static constexpr std::string_view WHAT = concat<
+    TYPES,
+    VALUE_NAMES[T1_IDX],
+    AND,
+    VALUE_NAMES[T2_IDX],
+    UNSUPPORTED_FOR_OPERATOR,
+    find_literal<F, OPERATORS>::value>;
+
+  virtual const char* what() const noexcept override {
+    return WHAT.data();
+  }
+
+  virtual ~OperationException() override = default;
+};
 
 std::size_t handle_unary_minus(std::string_view expr, std::size_t pos) {
   if (pos == 0)
