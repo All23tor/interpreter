@@ -1,6 +1,7 @@
 #include "Interpreter.hpp"
 #include <iomanip>
 #include <iostream>
+#include <memory>
 
 Value force_parse(const std::string var_name) {
   std::string value;
@@ -14,7 +15,7 @@ Value force_parse(const std::string var_name) {
     }
 }
 
-Value force_evaluate(const SyntaxTree& tree) {
+Value force_evaluate(const std::unique_ptr<Node>& tree) {
   Context context;
 
   while (true)
@@ -26,7 +27,7 @@ Value force_evaluate(const SyntaxTree& tree) {
 }
 
 void interpret(std::string_view expression) {
-  SyntaxTree tree;
+  std::unique_ptr<Node> tree;
 
   try {
     tree = parse_expression(expression);
@@ -44,7 +45,8 @@ void interpret(std::string_view expression) {
         else
           std::cout << '\t' << std::boolalpha << arg << '\n';
       },
-      force_evaluate(tree));
+      force_evaluate(tree)
+    );
   } catch (std::exception& e) {
     std::cerr << e.what() << '\n';
   }

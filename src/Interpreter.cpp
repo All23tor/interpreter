@@ -1,16 +1,59 @@
 #include "Interpreter.hpp"
-#include <algorithm>
 #include <array>
+#include <concepts>
+#include <format>
 #include <functional>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 
 namespace {
+
+template <class T>
+constexpr std::string_view name_type() {
+  if constexpr (std::same_as<T, int>)
+    return "int";
+  else if constexpr (std::same_as<T, float>)
+    return "float";
+  else if constexpr (std::same_as<T, bool>)
+    return "bool";
+  else if constexpr (std::same_as<T, std::string>)
+    return "string";
+  else if constexpr (std::same_as<T, std::logical_or<>>)
+    return "||";
+  else if constexpr (std::same_as<T, std::logical_and<>>)
+    return "&&";
+  else if constexpr (std::same_as<T, std::greater_equal<>>)
+    return ">=";
+  else if constexpr (std::same_as<T, std::less_equal<>>)
+    return "<=";
+  else if constexpr (std::same_as<T, std::greater<>>)
+    return ">";
+  else if constexpr (std::same_as<T, std::less<>>)
+    return "<";
+  else if constexpr (std::same_as<T, std::equal_to<>>)
+    return "==";
+  else if constexpr (std::same_as<T, std::not_equal_to<>>)
+    return "!=";
+  else if constexpr (std::same_as<T, std::plus<>>)
+    return "+";
+  else if constexpr (std::same_as<T, std::minus<>>)
+    return "-";
+  else if constexpr (std::same_as<T, std::multiplies<>>)
+    return "*";
+  else if constexpr (std::same_as<T, std::divides<>>)
+    return "/";
+  else if constexpr (std::same_as<T, std::modulus<>>)
+    return "%";
+  else
+    static_assert(false, "Unexpected type");
+}
+
+using SyntaxTree = std::unique_ptr<Node>;
 struct ValueNode final : public Node {
   const Value value;
 
-  ValueNode(const Value& _value) : value{_value} {}
-  ValueNode(Value&& _value) : value{std::move(_value)} {}
+  ValueNode(Value _value) : value{std::move(_value)} {}
   virtual ~ValueNode() override final = default;
   virtual Value evaluate(const Context&) const override final {
     return value;
@@ -31,19 +74,25 @@ struct VariableNode final : public Node {
   }
 };
 
-template <class T1, class T2, class F>
-struct OperationException;
-
-template <class Func>
+template <class F>
 struct OperationNode final : public Node {
-  static constexpr auto operation = [](auto&& a, auto&& b) -> Value {
-    if constexpr (requires { Func{}(a, b); })
-      return Func{}(a, b);
-    else
-      throw OperationException<
-        std::remove_cvref_t<decltype(a)>,
-        std::remove_cvref_t<decltype(b)>,
-        Func>{};
+  static constexpr auto operation = []<class A, class B>(A a, B b) -> Value {
+    if constexpr (requires { F{}(a, b); })
+      return F{}(a, b);
+    else {
+      std::string_view type1;
+      std::string_view type2;
+      std::string_view op;
+
+      throw std::runtime_error(
+        std::format(
+          "Types {:?} and {:?} unsupported for operator {:?}",
+          name_type<A>(),
+          name_type<B>(),
+          name_type<F>()
+        )
+      );
+    }
   };
   const SyntaxTree left;
   const SyntaxTree right;
@@ -51,147 +100,45 @@ struct OperationNode final : public Node {
   OperationNode(SyntaxTree&& _left, SyntaxTree&& _right) :
     left(std::move(_left)),
     right(std::move(_right)) {}
-  virtual ~OperationNode() override final = default;
-  virtual Value evaluate(const Context& context) const override final {
-    auto lhs = left->evaluate(context);
-    auto rhs = right->evaluate(context);
-    return std::visit(operation, std::move(lhs), std::move(rhs));
+  virtual ~OperationNode() override = default;
+  virtual Value evaluate(const Context& context) const override {
+    return std::visit(
+      operation, left->evaluate(context), right->evaluate(context)
+    );
   }
 };
 
-using NodeFactory = SyntaxTree (*)(SyntaxTree&&, SyntaxTree&&);
-template <typename Func>
-constexpr NodeFactory op_factory =
-  [](SyntaxTree&& left, SyntaxTree&& right) -> SyntaxTree {
-  return std::make_unique<OperationNode<Func>>(
-    std::move(left), std::move(right)
-  );
-};
+using NodeFactory = SyntaxTree (*)(SyntaxTree, SyntaxTree);
 
 struct OperationInfo {
-  std::string_view name;
   NodeFactory factory;
+  std::string_view name;
+
+  constexpr OperationInfo() : factory(nullptr), name("") {}
+  template <class F>
+  constexpr OperationInfo(F) :
+    factory([](SyntaxTree left, SyntaxTree right) -> SyntaxTree {
+      return std::make_unique<OperationNode<F>>(
+        std::move(left), std::move(right)
+      );
+    }),
+    name(name_type<F>()) {}
 };
 
-template <auto N>
-struct string_literal {
-  constexpr string_literal(const char (&str)[N]) {
-    std::copy_n(str, N, value);
-  }
-  char value[N];
-};
-
-template <class T, string_literal S>
-struct type_name {
-  using type = T;
-  static constexpr std::string_view value = S.value;
-};
-
-using OPERATORS = std::tuple<
-  type_name<std::logical_or<>, "||">,
-  type_name<std::logical_and<>, "&&">,
-  type_name<std::greater_equal<>, ">=">,
-  type_name<std::less_equal<>, "<=">,
-  type_name<std::greater<>, ">">,
-  type_name<std::less<>, "<">,
-  type_name<std::equal_to<>, "==">,
-  type_name<std::not_equal_to<>, "!=">,
-  type_name<std::plus<>, "+">,
-  type_name<std::minus<>, "-">,
-  type_name<std::multiplies<>, "*">,
-  type_name<std::divides<>, "/">,
-  type_name<std::modulus<>, "%">>;
-
-template <class T, class... Ts>
-struct find_literal;
-template <class T>
-struct find_literal<T> {};
-template <class T, class H, class... Ts>
-requires std::same_as<T, typename H::type>
-struct find_literal<T, H, Ts...> {
-  static constexpr std::string_view value = H::value;
-};
-template <class T, class H, class... Ts>
-struct find_literal<T, H, Ts...> {
-  static constexpr std::string_view value = find_literal<T, Ts...>::value;
-};
-template <class T, class... Ts>
-struct find_literal<T, std::tuple<Ts...>> {
-  static constexpr auto value = find_literal<T, Ts...>::value;
-};
-
-static constexpr std::array<OperationInfo, 13> operations = []() {
-  static constexpr auto nth_op_info =
-    []<std::size_t Idx = 0>(this auto nth_op_info, int idx) constexpr {
-      using T = std::tuple_element_t<Idx, OPERATORS>;
-      if (Idx == idx)
-        return OperationInfo{T::value, op_factory<typename T::type>};
-      else if constexpr (Idx + 1 != std::tuple_size_v<OPERATORS>)
-        return nth_op_info.template operator()<Idx + 1>(idx);
-
-      std::unreachable();
-    };
-
-  std::array<OperationInfo, 13> operations;
-  for (int i = 0; i < std::tuple_size_v<OPERATORS>; i++)
-    operations[i] = nth_op_info(i);
-  return operations;
-}();
-
-template <class T1, class T2, class F>
-struct OperationException : std::exception {
-  template <const std::string_view&... views>
-  struct concat_impl {
-    static constexpr auto arr = [] {
-      constexpr std::size_t len = (views.size() + ... + 0);
-      std::array<char, len + 1> arr{};
-      auto append = [i = 0, &arr](auto const& s) mutable {
-        for (auto c : s)
-          arr[i++] = c;
-      };
-      (append(views), ...);
-      arr[len] = 0;
-      return arr;
-    }();
-
-    static constexpr std::string_view value{arr.data(), arr.size() - 1};
-  };
-  template <const std::string_view&... views>
-  static constexpr auto concat = concat_impl<views...>::value;
-
-  static constexpr std::array<std::string_view, std::variant_size_v<Value>>
-    VALUE_NAMES = {"bool", "int", "float", "string"};
-
-  template <typename T, typename V>
-  struct get_index;
-
-  template <class T>
-  struct tag {};
-  template <typename T, typename... Ts>
-  struct get_index<T, std::variant<Ts...>> {
-    static constexpr std::size_t value =
-      std::variant<tag<Ts>...>(tag<T>{}).index();
-  };
-
-  static constexpr std::string_view TYPES = "Types ";
-  static constexpr std::size_t T1_IDX = get_index<T1, Value>::value;
-  static constexpr std::string_view AND = " and ";
-  static constexpr std::size_t T2_IDX = get_index<T2, Value>::value;
-  static constexpr std::string_view UNSUPPORTED_FOR_OPERATOR =
-    " unsupported for operator ";
-  static constexpr std::string_view WHAT = concat<
-    TYPES,
-    VALUE_NAMES[T1_IDX],
-    AND,
-    VALUE_NAMES[T2_IDX],
-    UNSUPPORTED_FOR_OPERATOR,
-    find_literal<F, OPERATORS>::value>;
-
-  virtual const char* what() const noexcept override {
-    return WHAT.data();
-  }
-
-  virtual ~OperationException() override = default;
+static constexpr std::array<OperationInfo, 13> operations = {
+  std::logical_or{},
+  std::logical_and{},
+  std::greater_equal{},
+  std::less_equal{},
+  std::greater{},
+  std::less{},
+  std::equal_to{},
+  std::not_equal_to{},
+  std::plus{},
+  std::minus{},
+  std::multiplies{},
+  std::divides{},
+  std::modulus{},
 };
 
 std::size_t handle_unary_minus(std::string_view expr, std::size_t pos) {
@@ -202,7 +149,7 @@ std::size_t handle_unary_minus(std::string_view expr, std::size_t pos) {
   return pos;
 }
 
-std::pair<std::size_t, OperationInfo> find_lowest(std::string_view expr) {
+std::pair<std::size_t, OperationInfo> find_lowest_op(std::string_view expr) {
   for (const auto& operation : operations) {
     auto pos = expr.find(operation.name);
     if (operation.name == "-")
@@ -226,36 +173,32 @@ std::pair<std::size_t, OperationInfo> find_lowest(std::string_view expr) {
   return {std::string_view::npos, {}};
 }
 
-bool balanced_parenthesis(std::string_view expression) {
+bool balanced(std::string_view expression) {
   int depth = 0;
-  for (std::size_t i = 0; i < expression.length() - 1; ++i) {
-    char c = expression[i];
+  for (char c : expression) {
     if (c == '(')
       ++depth;
     else if (c == ')')
       --depth;
-    if (depth == 0)
+    if (depth < 0)
       return false;
   }
-  return true;
+  return depth == 0;
 }
 
-SyntaxTree make_tree(std::string_view expression) {
-  while (expression.front() == '(' && expression.back() == ')')
-    if (balanced_parenthesis(expression))
-      expression = expression.substr(1, expression.size() - 2);
-    else
-      break;
+SyntaxTree make_tree(std::string_view expr) {
+  while (expr.front() == '(' && expr.back() == ')' && balanced(expr))
+    expr = expr.substr(1, expr.size() - 2);
 
-  auto [pos, op] = find_lowest(expression);
+  auto [pos, op] = find_lowest_op(expr);
   if (pos == std::string::npos) {
-    if (expression.front() == '$')
-      return std::make_unique<VariableNode>(std::string(expression.substr(1)));
-    return std::make_unique<ValueNode>(parse_value(std::move(expression)));
+    if (expr.front() == '$')
+      return std::make_unique<VariableNode>(std::string(expr.substr(1)));
+    return std::make_unique<ValueNode>(parse_value(std::move(expr)));
   }
 
-  auto left_tree = make_tree(expression.substr(0, pos));
-  auto right_tree = make_tree(expression.substr(pos + op.name.size()));
+  auto left_tree = make_tree(expr.substr(0, pos));
+  auto right_tree = make_tree(expr.substr(pos + op.name.size()));
   return op.factory(std::move(left_tree), std::move(right_tree));
 }
 } // namespace
