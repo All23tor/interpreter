@@ -1,6 +1,5 @@
 #include "Interpreter.hpp"
 #include <array>
-#include <concepts>
 #include <format>
 #include <functional>
 #include <stdexcept>
@@ -8,53 +7,50 @@
 #include <utility>
 
 namespace {
+using NodePtr = std::unique_ptr<Node>;
 
 template <class T>
-constexpr std::string_view name_type() {
-  if constexpr (std::same_as<T, int>)
-    return "int";
-  else if constexpr (std::same_as<T, float>)
-    return "float";
-  else if constexpr (std::same_as<T, bool>)
-    return "bool";
-  else if constexpr (std::same_as<T, std::string>)
-    return "string";
-  else if constexpr (std::same_as<T, std::logical_or<>>)
-    return "||";
-  else if constexpr (std::same_as<T, std::logical_and<>>)
-    return "&&";
-  else if constexpr (std::same_as<T, std::greater_equal<>>)
-    return ">=";
-  else if constexpr (std::same_as<T, std::less_equal<>>)
-    return "<=";
-  else if constexpr (std::same_as<T, std::greater<>>)
-    return ">";
-  else if constexpr (std::same_as<T, std::less<>>)
-    return "<";
-  else if constexpr (std::same_as<T, std::equal_to<>>)
-    return "==";
-  else if constexpr (std::same_as<T, std::not_equal_to<>>)
-    return "!=";
-  else if constexpr (std::same_as<T, std::plus<>>)
-    return "+";
-  else if constexpr (std::same_as<T, std::minus<>>)
-    return "-";
-  else if constexpr (std::same_as<T, std::multiplies<>>)
-    return "*";
-  else if constexpr (std::same_as<T, std::divides<>>)
-    return "/";
-  else if constexpr (std::same_as<T, std::modulus<>>)
-    return "%";
-  else
-    static_assert(false, "Unexpected type");
-}
+constexpr std::string_view name_type;
+template <>
+constexpr std::string_view name_type<int> = "int";
+template <>
+constexpr std::string_view name_type<float> = "float";
+template <>
+constexpr std::string_view name_type<bool> = "bool";
+template <>
+constexpr std::string_view name_type<std::string> = "string";
+template <>
+constexpr std::string_view name_type<std::logical_or<>> = "||";
+template <>
+constexpr std::string_view name_type<std::logical_and<>> = "&&";
+template <>
+constexpr std::string_view name_type<std::greater_equal<>> = ">=";
+template <>
+constexpr std::string_view name_type<std::less_equal<>> = "<=";
+template <>
+constexpr std::string_view name_type<std::greater<>> = ">";
+template <>
+constexpr std::string_view name_type<std::less<>> = "<";
+template <>
+constexpr std::string_view name_type<std::equal_to<>> = "==";
+template <>
+constexpr std::string_view name_type<std::not_equal_to<>> = "!=";
+template <>
+constexpr std::string_view name_type<std::plus<>> = "+";
+template <>
+constexpr std::string_view name_type<std::minus<>> = "-";
+template <>
+constexpr std::string_view name_type<std::multiplies<>> = "*";
+template <>
+constexpr std::string_view name_type<std::divides<>> = "/";
+template <>
+constexpr std::string_view name_type<std::modulus<>> = "%";
 
-using SyntaxTree = std::unique_ptr<Node>;
-struct ValueNode final : public Node {
+struct LiteralNode final : public Node {
   const Value value;
 
-  ValueNode(Value _value) : value{std::move(_value)} {}
-  virtual ~ValueNode() override final = default;
+  LiteralNode(Value _value) : value{std::move(_value)} {}
+  virtual ~LiteralNode() override final = default;
   virtual Value evaluate(const Context&) const override final {
     return value;
   }
@@ -65,9 +61,9 @@ struct VariableNode final : public Node {
 
   VariableNode(std::string _name) : name{std::move(_name)} {}
   virtual ~VariableNode() override final = default;
-  virtual Value evaluate(const Context& context) const override final {
+  virtual Value evaluate(const Context& ctx) const override final {
     try {
-      return context.at(name);
+      return ctx.at(name);
     } catch (std::out_of_range& oor) {
       throw name;
     }
@@ -76,39 +72,35 @@ struct VariableNode final : public Node {
 
 template <class F>
 struct OperationNode final : public Node {
-  static constexpr auto operation = []<class A, class B>(A a, B b) -> Value {
-    if constexpr (requires { F{}(a, b); })
-      return F{}(a, b);
-    else {
-      std::string_view type1;
-      std::string_view type2;
-      std::string_view op;
+  NodePtr left;
+  NodePtr right;
 
-      throw std::runtime_error(
-        std::format(
-          "Types {:?} and {:?} unsupported for operator {:?}",
-          name_type<A>(),
-          name_type<B>(),
-          name_type<F>()
-        )
-      );
-    }
-  };
-  const SyntaxTree left;
-  const SyntaxTree right;
-
-  OperationNode(SyntaxTree&& _left, SyntaxTree&& _right) :
+  OperationNode(NodePtr&& _left, NodePtr&& _right) :
     left(std::move(_left)),
     right(std::move(_right)) {}
   virtual ~OperationNode() override = default;
-  virtual Value evaluate(const Context& context) const override {
+  virtual Value evaluate(const Context& ctx) const override {
     return std::visit(
-      operation, left->evaluate(context), right->evaluate(context)
+      []<class A, class B>(A a, B b) -> Value {
+        if constexpr (requires { F{}(a, b); })
+          return F{}(a, b);
+        else
+          throw std::runtime_error(
+            std::format(
+              "Types {:?} and {:?} unsupported for operator {:?}",
+              name_type<A>,
+              name_type<B>,
+              name_type<F>
+            )
+          );
+      },
+      left->evaluate(ctx),
+      right->evaluate(ctx)
     );
   }
 };
 
-using NodeFactory = SyntaxTree (*)(SyntaxTree, SyntaxTree);
+using NodeFactory = NodePtr (*)(NodePtr, NodePtr);
 
 struct OperationInfo {
   NodeFactory factory;
@@ -117,12 +109,12 @@ struct OperationInfo {
   constexpr OperationInfo() : factory(nullptr), name("") {}
   template <class F>
   constexpr OperationInfo(F) :
-    factory([](SyntaxTree left, SyntaxTree right) -> SyntaxTree {
+    factory([](NodePtr left, NodePtr right) -> NodePtr {
       return std::make_unique<OperationNode<F>>(
         std::move(left), std::move(right)
       );
     }),
-    name(name_type<F>()) {}
+    name(name_type<F>) {}
 };
 
 static constexpr std::array<OperationInfo, 13> operations = {
@@ -186,15 +178,15 @@ bool balanced(std::string_view expression) {
   return depth == 0;
 }
 
-SyntaxTree make_tree(std::string_view expr) {
-  while (expr.front() == '(' && expr.back() == ')' && balanced(expr))
+NodePtr make_tree(std::string_view expr) {
+  while (expr.starts_with('(') && expr.ends_with(')') && balanced(expr))
     expr = expr.substr(1, expr.size() - 2);
 
   auto [pos, op] = find_lowest_op(expr);
   if (pos == std::string::npos) {
-    if (expr.front() == '$')
+    if (expr.starts_with('$'))
       return std::make_unique<VariableNode>(std::string(expr.substr(1)));
-    return std::make_unique<ValueNode>(parse_value(std::move(expr)));
+    return std::make_unique<LiteralNode>(parse_value(expr));
   }
 
   auto left_tree = make_tree(expr.substr(0, pos));
@@ -203,19 +195,19 @@ SyntaxTree make_tree(std::string_view expr) {
 }
 } // namespace
 
-Value parse_value(std::string_view expression) {
-  if (expression == "true")
+Value parse_value(std::string_view expr) {
+  if (expr == "true")
     return true;
-  if (expression == "false")
+  if (expr == "false")
     return false;
-  if (expression.contains('.'))
-    return std::stof(std::string(expression));
-  if (expression.front() == '"')
-    return std::string(expression.substr(1, expression.size() - 2));
-  return std::stoi(std::string(expression));
+  if (expr.contains('.'))
+    return std::stof(std::string(expr));
+  if (expr.size() >= 2 && expr.starts_with('"') && expr.ends_with('"'))
+    return std::string(expr.substr(1, expr.size() - 2));
+  return std::stoi(std::string(expr));
 }
 
-SyntaxTree parse_expression(std::string_view expression) {
+NodePtr parse_expression(std::string_view expression) {
   std::string formatted_expression{expression};
   std::erase(formatted_expression, ' ');
   return make_tree(formatted_expression);
