@@ -27,7 +27,7 @@ Value force_parse(const std::string var_name) {
     try {
       return parse_value(value);
     } catch (std::invalid_argument& ia) {
-      std::print("${}: ", var_name);
+      std::print("{}: ", var_name);
       std::getline(std::cin, value);
     }
 }

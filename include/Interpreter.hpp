@@ -7,20 +7,6 @@ struct Value {
 };
 using Context = std::map<std::string, Value>;
 
-Value operator||(const Value&, const Value&);
-Value operator&&(const Value&, const Value&);
-Value operator>=(const Value&, const Value&);
-Value operator<=(const Value&, const Value&);
-Value operator>(const Value&, const Value&);
-Value operator<(const Value&, const Value&);
-Value operator==(const Value&, const Value&);
-Value operator!=(const Value&, const Value&);
-Value operator+(const Value&, const Value&);
-Value operator-(const Value&, const Value&);
-Value operator*(const Value&, const Value&);
-Value operator/(const Value&, const Value&);
-Value operator%(const Value&, const Value&);
-
 struct Node {
   virtual ~Node() = default;
   virtual Value evaluate(const Context&) const = 0;

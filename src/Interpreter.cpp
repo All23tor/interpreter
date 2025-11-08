@@ -1,4 +1,5 @@
 #include "Interpreter.hpp"
+#include <algorithm>
 #include <array>
 #include <format>
 #include <functional>
@@ -6,27 +7,6 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-
-#define DEFINE_VALUE_OP(symbol)                                                \
-  Value operator symbol(const Value& lhs, const Value& rhs) {                  \
-    return std::visit(                                                         \
-      []<class A, class B>(const A& a, const B& b) -> Value {                  \
-        if constexpr (requires { a symbol b; })                                \
-          return {a symbol b};                                                 \
-        else                                                                   \
-          throw std::runtime_error(                                            \
-            std::format(                                                       \
-              "Types {:?} and {:?} unsuported for operator {:?}",              \
-              name_type<A>,                                                    \
-              name_type<B>,                                                    \
-              #symbol                                                          \
-            )                                                                  \
-          );                                                                   \
-      },                                                                       \
-      lhs.v,                                                                   \
-      rhs.v                                                                    \
-    );                                                                         \
-  }
 
 namespace {
 template <class T>
@@ -67,23 +47,7 @@ template <>
 constexpr std::string_view name_type<std::divides<>> = "/";
 template <>
 constexpr std::string_view name_type<std::modulus<>> = "%";
-} // namespace
 
-DEFINE_VALUE_OP(||)
-DEFINE_VALUE_OP(&&)
-DEFINE_VALUE_OP(>=)
-DEFINE_VALUE_OP(<=)
-DEFINE_VALUE_OP(>)
-DEFINE_VALUE_OP(<)
-DEFINE_VALUE_OP(==)
-DEFINE_VALUE_OP(!=)
-DEFINE_VALUE_OP(+)
-DEFINE_VALUE_OP(-)
-DEFINE_VALUE_OP(*)
-DEFINE_VALUE_OP(/)
-DEFINE_VALUE_OP(%)
-
-namespace {
 using NodePtr = std::unique_ptr<Node>;
 struct LiteralNode final : public Node {
   const Value value;
@@ -119,7 +83,23 @@ struct OperationNode final : public Node {
     right(std::move(_right)) {}
   virtual ~OperationNode() override = default;
   virtual Value evaluate(const Context& ctx) const override {
-    return F{}(left->evaluate(ctx), right->evaluate(ctx));
+    return std::visit(
+      []<class A, class B>(const A& a, const B& b) -> Value {
+        if constexpr (requires { f(a, b); })
+          return {F{}(a, b)};
+        else
+          throw std::runtime_error(
+            std::format(
+              "Types {:?} and {:?} unsuported for operator {:?}",
+              name_type<A>,
+              name_type<B>,
+              name_type<F>
+            )
+          );
+      },
+      left->evaluate(ctx).v,
+      right->evaluate(ctx).v
+    );
   }
 };
 
@@ -201,14 +181,25 @@ bool balanced(std::string_view expression) {
   return depth == 0;
 }
 
+bool variable_name(std::string_view name) {
+  static constexpr std::array<std::string_view, 2> reserved = {"false", "true"};
+  if (std::ranges::contains(reserved, name))
+    return false;
+  if (name.empty() || std::isdigit(static_cast<unsigned char>(name.front())))
+    return false;
+  return std::ranges::all_of(name, [](unsigned char c) {
+    return std::isalnum(c) || c == '_';
+  });
+}
+
 NodePtr make_tree(std::string_view expr) {
   while (expr.starts_with('(') && expr.ends_with(')') && balanced(expr))
     expr = expr.substr(1, expr.size() - 2);
 
   auto [pos, op] = find_lowest_op(expr);
   if (pos == std::string::npos) {
-    if (expr.starts_with('$'))
-      return std::make_unique<VariableNode>(std::string(expr.substr(1)));
+    if (variable_name(expr))
+      return std::make_unique<VariableNode>(std::string(expr));
     return std::make_unique<LiteralNode>(parse_value(expr));
   }
 
