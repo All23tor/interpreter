@@ -4,13 +4,35 @@
 #include <functional>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
-namespace {
-using NodePtr = std::unique_ptr<Node>;
+#define DEFINE_VALUE_OP(symbol)                                                \
+  Value operator symbol(const Value& lhs, const Value& rhs) {                  \
+    return std::visit(                                                         \
+      []<class A, class B>(const A& a, const B& b) -> Value {                  \
+        if constexpr (requires { a symbol b; })                                \
+          return {a symbol b};                                                 \
+        else                                                                   \
+          throw std::runtime_error(                                            \
+            std::format(                                                       \
+              "Types {:?} and {:?} unsuported for operator {:?}",              \
+              name_type<A>,                                                    \
+              name_type<B>,                                                    \
+              #symbol                                                          \
+            )                                                                  \
+          );                                                                   \
+      },                                                                       \
+      lhs.v,                                                                   \
+      rhs.v                                                                    \
+    );                                                                         \
+  }
 
+namespace {
 template <class T>
-constexpr std::string_view name_type;
+constexpr std::string_view name_type = [] {
+  static_assert(false, "name_type<T> is not specialized for this type");
+}();
 template <>
 constexpr std::string_view name_type<int> = "int";
 template <>
@@ -45,7 +67,24 @@ template <>
 constexpr std::string_view name_type<std::divides<>> = "/";
 template <>
 constexpr std::string_view name_type<std::modulus<>> = "%";
+} // namespace
 
+DEFINE_VALUE_OP(||)
+DEFINE_VALUE_OP(&&)
+DEFINE_VALUE_OP(>=)
+DEFINE_VALUE_OP(<=)
+DEFINE_VALUE_OP(>)
+DEFINE_VALUE_OP(<)
+DEFINE_VALUE_OP(==)
+DEFINE_VALUE_OP(!=)
+DEFINE_VALUE_OP(+)
+DEFINE_VALUE_OP(-)
+DEFINE_VALUE_OP(*)
+DEFINE_VALUE_OP(/)
+DEFINE_VALUE_OP(%)
+
+namespace {
+using NodePtr = std::unique_ptr<Node>;
 struct LiteralNode final : public Node {
   const Value value;
 
@@ -80,23 +119,7 @@ struct OperationNode final : public Node {
     right(std::move(_right)) {}
   virtual ~OperationNode() override = default;
   virtual Value evaluate(const Context& ctx) const override {
-    return std::visit(
-      []<class A, class B>(A a, B b) -> Value {
-        if constexpr (requires { F{}(a, b); })
-          return F{}(a, b);
-        else
-          throw std::runtime_error(
-            std::format(
-              "Types {:?} and {:?} unsupported for operator {:?}",
-              name_type<A>,
-              name_type<B>,
-              name_type<F>
-            )
-          );
-      },
-      left->evaluate(ctx),
-      right->evaluate(ctx)
-    );
+    return F{}(left->evaluate(ctx), right->evaluate(ctx));
   }
 };
 
@@ -141,7 +164,7 @@ std::size_t handle_unary_minus(std::string_view expr, std::size_t pos) {
   return pos;
 }
 
-std::pair<std::size_t, OperationInfo> find_lowest_op(std::string_view expr) {
+auto find_lowest_op(std::string_view expr) {
   for (const auto& operation : operations) {
     auto pos = expr.find(operation.name);
     if (operation.name == "-")
@@ -160,9 +183,9 @@ std::pair<std::size_t, OperationInfo> find_lowest_op(std::string_view expr) {
     if (parenCount != 0)
       continue;
 
-    return {pos, operation};
+    return std::pair{pos, operation};
   }
-  return {std::string_view::npos, {}};
+  return std::pair{std::string_view::npos, OperationInfo{}};
 }
 
 bool balanced(std::string_view expression) {
@@ -197,14 +220,14 @@ NodePtr make_tree(std::string_view expr) {
 
 Value parse_value(std::string_view expr) {
   if (expr == "true")
-    return true;
+    return Value{true};
   if (expr == "false")
-    return false;
+    return Value{false};
   if (expr.contains('.'))
-    return std::stof(std::string(expr));
+    return Value{std::stof(std::string(expr))};
   if (expr.size() >= 2 && expr.starts_with('"') && expr.ends_with('"'))
-    return std::string(expr.substr(1, expr.size() - 2));
-  return std::stoi(std::string(expr));
+    return Value{std::string(expr.substr(1, expr.size() - 2))};
+  return Value{std::stoi(std::string(expr))};
 }
 
 NodePtr parse_expression(std::string_view expression) {

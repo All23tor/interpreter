@@ -2,8 +2,24 @@
 #include <memory>
 #include <variant>
 
-using Value = std::variant<bool, int, float, std::string>;
+struct Value {
+  std::variant<bool, int, float, std::string> v;
+};
 using Context = std::map<std::string, Value>;
+
+Value operator||(const Value&, const Value&);
+Value operator&&(const Value&, const Value&);
+Value operator>=(const Value&, const Value&);
+Value operator<=(const Value&, const Value&);
+Value operator>(const Value&, const Value&);
+Value operator<(const Value&, const Value&);
+Value operator==(const Value&, const Value&);
+Value operator!=(const Value&, const Value&);
+Value operator+(const Value&, const Value&);
+Value operator-(const Value&, const Value&);
+Value operator*(const Value&, const Value&);
+Value operator/(const Value&, const Value&);
+Value operator%(const Value&, const Value&);
 
 struct Node {
   virtual ~Node() = default;

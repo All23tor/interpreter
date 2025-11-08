@@ -1,7 +1,24 @@
 #include "Interpreter.hpp"
-#include <iomanip>
+#include <format>
 #include <iostream>
 #include <memory>
+#include <print>
+
+static constexpr std::array value_names = {"bool", "int", "float", "string"};
+template <>
+struct std::formatter<Value> {
+  constexpr auto parse(std::format_parse_context& ctx) {
+    return ctx.begin();
+  }
+  auto format(const Value& v, std::format_context& ctx) const {
+    return std::visit(
+      [idx = v.v.index(), &ctx](auto&& arg) {
+        return std::format_to(ctx.out(), "{} {}", value_names[idx], arg);
+      },
+      v.v
+    );
+  }
+};
 
 Value force_parse(const std::string var_name) {
   std::string value;
@@ -10,7 +27,7 @@ Value force_parse(const std::string var_name) {
     try {
       return parse_value(value);
     } catch (std::invalid_argument& ia) {
-      std::cout << "$" << var_name << ": ";
+      std::print("${}: ", var_name);
       std::getline(std::cin, value);
     }
 }
@@ -32,34 +49,25 @@ void interpret(std::string_view expression) {
   try {
     tree = parse_expression(expression);
   } catch (std::invalid_argument& ia) {
-    std::cerr << "Unrecognized value\n";
+    std::println(std::cerr, "Unrecognized value\n");
     return;
   }
 
   try {
-    std::visit(
-      [](auto&& arg) {
-        using T = std::remove_cvref_t<decltype(arg)>;
-        if constexpr (std::is_same_v<std::string, T>)
-          std::cout << '\t' << std::quoted(arg) << '\n';
-        else
-          std::cout << '\t' << std::boolalpha << arg << '\n';
-      },
-      force_evaluate(tree)
-    );
+    std::println("  {}", force_evaluate(tree));
   } catch (std::exception& e) {
-    std::cerr << e.what() << '\n';
+    std::println(std::cerr, "{}", e.what());
   }
 }
 
 int main() {
   std::string expression;
   while (!std::cin.eof()) {
-    std::clog << "> ";
+    std::print(std::clog, "> ");
     std::getline(std::cin, expression);
     if (expression.empty())
       continue;
     interpret(expression);
   }
-  std::cout << '\n';
+  std::println();
 }
