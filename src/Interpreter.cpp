@@ -3,6 +3,7 @@
 #include <array>
 #include <format>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
@@ -65,35 +66,34 @@ struct VariableNode final : public Node {
   VariableNode(std::string _name) : name{std::move(_name)} {}
   virtual ~VariableNode() override final = default;
   virtual Value evaluate(const Context& ctx) const override final {
-    try {
-      return ctx.at(name);
-    } catch (std::out_of_range& oor) {
-      throw name;
-    }
+    return ctx.at(name);
   }
 };
 
+NodePtr make_tree(std::string_view expr);
+
 template <class F>
-struct OperationNode final : public Node {
+struct BinaryOperationNode final : public Node {
+  static constexpr auto op_name = name_type<F>;
   NodePtr left;
   NodePtr right;
 
-  OperationNode(NodePtr&& _left, NodePtr&& _right) :
-    left(std::move(_left)),
-    right(std::move(_right)) {}
-  virtual ~OperationNode() override = default;
+  BinaryOperationNode(std::string_view expr, std::size_t pos) :
+    left(make_tree(expr.substr(0, pos))),
+    right(make_tree(expr.substr(pos + op_name.size()))) {}
+  virtual ~BinaryOperationNode() override = default;
   virtual Value evaluate(const Context& ctx) const override {
     return std::visit(
       []<class A, class B>(const A& a, const B& b) -> Value {
-        if constexpr (requires { f(a, b); })
+        if constexpr (requires { F{}(a, b); })
           return {F{}(a, b)};
         else
           throw std::runtime_error(
             std::format(
-              "Types {:?} and {:?} unsuported for operator {:?}",
+              "Operator {} does not support types {} and {}",
+              name_type<F>,
               name_type<A>,
-              name_type<B>,
-              name_type<F>
+              name_type<B>
             )
           );
       },
@@ -103,19 +103,16 @@ struct OperationNode final : public Node {
   }
 };
 
-using NodeFactory = NodePtr (*)(NodePtr, NodePtr);
+using NodeFactory = NodePtr (*)(std::string_view, std::size_t);
 
 struct OperationInfo {
   NodeFactory factory;
   std::string_view name;
 
-  constexpr OperationInfo() : factory(nullptr), name("") {}
   template <class F>
   constexpr OperationInfo(F) :
-    factory([](NodePtr left, NodePtr right) -> NodePtr {
-      return std::make_unique<OperationNode<F>>(
-        std::move(left), std::move(right)
-      );
+    factory([](std::string_view expr, std::size_t pos) -> NodePtr {
+      return std::make_unique<BinaryOperationNode<F>>(expr, pos);
     }),
     name(name_type<F>) {}
 };
@@ -144,7 +141,12 @@ std::size_t handle_unary_minus(std::string_view expr, std::size_t pos) {
   return pos;
 }
 
-auto find_lowest_op(std::string_view expr) {
+struct FoundOperator {
+  std::size_t pos;
+  OperationInfo operation;
+};
+
+std::optional<FoundOperator> find_lowest_op(std::string_view expr) {
   for (const auto& operation : operations) {
     auto pos = expr.find(operation.name);
     if (operation.name == "-")
@@ -163,9 +165,9 @@ auto find_lowest_op(std::string_view expr) {
     if (parenCount != 0)
       continue;
 
-    return std::pair{pos, operation};
+    return FoundOperator{pos, operation};
   }
-  return std::pair{std::string_view::npos, OperationInfo{}};
+  return std::nullopt;
 }
 
 bool balanced(std::string_view expression) {
@@ -196,16 +198,15 @@ NodePtr make_tree(std::string_view expr) {
   while (expr.starts_with('(') && expr.ends_with(')') && balanced(expr))
     expr = expr.substr(1, expr.size() - 2);
 
-  auto [pos, op] = find_lowest_op(expr);
-  if (pos == std::string::npos) {
-    if (variable_name(expr))
-      return std::make_unique<VariableNode>(std::string(expr));
-    return std::make_unique<LiteralNode>(parse_value(expr));
+  auto result = find_lowest_op(expr);
+  if (result) {
+    auto [pos, op] = *result;
+    return op.factory(expr, pos);
   }
 
-  auto left_tree = make_tree(expr.substr(0, pos));
-  auto right_tree = make_tree(expr.substr(pos + op.name.size()));
-  return op.factory(std::move(left_tree), std::move(right_tree));
+  if (variable_name(expr))
+    return std::make_unique<VariableNode>(std::string(expr));
+  return std::make_unique<LiteralNode>(parse_value(expr));
 }
 } // namespace
 
