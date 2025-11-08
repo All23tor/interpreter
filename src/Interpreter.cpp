@@ -1,6 +1,7 @@
 #include "Interpreter.hpp"
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <format>
 #include <functional>
 #include <optional>
@@ -191,7 +192,9 @@ std::string_view trim(std::string_view sv) {
 }
 
 bool variable_name(std::string_view name) {
-  static constexpr std::array<std::string_view, 2> reserved = {"false", "true"};
+  static constexpr std::array<std::string_view, 4> reserved = {
+    "false", "true", "inf", "nan"
+  };
   if (std::ranges::contains(reserved, name))
     return false;
   if (name.empty() || is_digit(name.front()))
@@ -211,11 +214,27 @@ Value parse_value(std::string_view expr) {
     return Value{true};
   if (expr == "false")
     return Value{false};
-  if (expr.contains('.'))
-    return Value{std::stof(std::string(expr))};
-  if (expr.size() >= 2 && expr.starts_with('"') && expr.ends_with('"'))
+
+  if (expr.size() >= 2 && expr.front() == '"' && expr.back() == '"')
     return Value{std::string(expr.substr(1, expr.size() - 2))};
-  return Value{std::stoi(std::string(expr))};
+
+  {
+    int i{};
+    const auto [ptr, ec] =
+      std::from_chars(expr.data(), expr.data() + expr.size(), i);
+    if (ec == std::errc() && ptr == expr.data() + expr.size())
+      return Value{i};
+  }
+
+  {
+    float f{};
+    const auto [ptr, ec] =
+      std::from_chars(expr.data(), expr.data() + expr.size(), f);
+    if (ec == std::errc() && ptr == expr.data() + expr.size())
+      return Value{f};
+  }
+
+  throw std::invalid_argument(std::format("Invalid literal: '{}'", expr));
 }
 
 NodePtr parse_expression(std::string_view expr) {
