@@ -49,7 +49,7 @@ void interpret(std::string_view expression) {
   try {
     tree = parse_expression(expression);
   } catch (std::invalid_argument& ia) {
-    std::println(std::cerr, "Unrecognized value\n");
+    std::println(std::cerr, "{}", ia.what());
     return;
   }
 

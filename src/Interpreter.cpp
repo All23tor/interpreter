@@ -70,8 +70,6 @@ struct VariableNode final : public Node {
   }
 };
 
-NodePtr make_tree(std::string_view expr);
-
 template <class F>
 struct BinaryOperationNode final : public Node {
   static constexpr auto op_name = name_type<F>;
@@ -79,8 +77,8 @@ struct BinaryOperationNode final : public Node {
   NodePtr right;
 
   BinaryOperationNode(std::string_view expr, std::size_t pos) :
-    left(make_tree(expr.substr(0, pos))),
-    right(make_tree(expr.substr(pos + op_name.size()))) {}
+    left(parse_expression(expr.substr(0, pos))),
+    right(parse_expression(expr.substr(pos + op_name.size()))) {}
   virtual ~BinaryOperationNode() override = default;
   virtual Value evaluate(const Context& ctx) const override {
     return std::visit(
@@ -133,10 +131,13 @@ static constexpr std::array<OperationInfo, 13> operations = {
   std::modulus{},
 };
 
+// necessary to avoid ugly static_cast<unsigned char> everywhere
+constexpr auto is_alnum = [](unsigned char c) { return std::isalnum(c); };
+constexpr auto is_digit = [](unsigned char c) { return std::isdigit(c); };
+constexpr auto is_space = [](unsigned char c) { return std::isspace(c); };
+
 std::size_t handle_unary_minus(std::string_view expr, std::size_t pos) {
-  if (pos == 0)
-    pos = expr.find("-", 1);
-  while (pos != std::string_view::npos && !std::isalnum(expr[pos - 1]))
+  while (pos != std::string_view::npos && (pos == 0 || !isalnum(expr[pos - 1])))
     pos = expr.find("-", pos + 1);
   return pos;
 }
@@ -183,34 +184,29 @@ bool balanced(std::string_view expression) {
   return depth == 0;
 }
 
+std::string_view trim(std::string_view sv) {
+  auto start = std::ranges::find_if_not(sv, is_space) - sv.begin();
+  auto end = std::ranges::find_last_if_not(sv, is_space).begin() - sv.begin();
+  return sv.substr(start, end - start + 1);
+}
+
 bool variable_name(std::string_view name) {
   static constexpr std::array<std::string_view, 2> reserved = {"false", "true"};
   if (std::ranges::contains(reserved, name))
     return false;
-  if (name.empty() || std::isdigit(static_cast<unsigned char>(name.front())))
+  if (name.empty() || is_digit(name.front()))
     return false;
   return std::ranges::all_of(name, [](unsigned char c) {
-    return std::isalnum(c) || c == '_';
+    return is_alnum(c) || c == '_';
   });
 }
 
-NodePtr make_tree(std::string_view expr) {
-  while (expr.starts_with('(') && expr.ends_with(')') && balanced(expr))
-    expr = expr.substr(1, expr.size() - 2);
-
-  auto result = find_lowest_op(expr);
-  if (result) {
-    auto [pos, op] = *result;
-    return op.factory(expr, pos);
-  }
-
-  if (variable_name(expr))
-    return std::make_unique<VariableNode>(std::string(expr));
-  return std::make_unique<LiteralNode>(parse_value(expr));
-}
 } // namespace
 
 Value parse_value(std::string_view expr) {
+  if (expr.empty())
+    throw std::invalid_argument("Expected something, got nothing");
+
   if (expr == "true")
     return Value{true};
   if (expr == "false")
@@ -222,8 +218,18 @@ Value parse_value(std::string_view expr) {
   return Value{std::stoi(std::string(expr))};
 }
 
-NodePtr parse_expression(std::string_view expression) {
-  std::string formatted_expression{expression};
-  std::erase(formatted_expression, ' ');
-  return make_tree(formatted_expression);
+NodePtr parse_expression(std::string_view expr) {
+  expr = trim(expr);
+  while (expr.starts_with('(') && expr.ends_with(')') && balanced(expr))
+    expr = trim(expr.substr(1, expr.size() - 2));
+
+  auto result = find_lowest_op(expr);
+  if (result) {
+    auto [pos, op] = *result;
+    return op.factory(expr, pos);
+  }
+
+  if (variable_name(expr))
+    return std::make_unique<VariableNode>(std::string(expr));
+  return std::make_unique<LiteralNode>(parse_value(expr));
 }
