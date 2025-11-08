@@ -11,6 +11,8 @@
 #include <utility>
 
 namespace {
+namespace sr = std::ranges;
+
 template <class T>
 constexpr std::string_view name_type = [] {
   static_assert(false, "name_type<T> is not specialized for this type");
@@ -89,7 +91,7 @@ struct BinaryOperationNode final : public Node {
         else
           throw std::runtime_error(
             std::format(
-              "Operator {} does not support types {} and {}",
+              "Operator '{}' does not support types '{}' and '{}'",
               name_type<F>,
               name_type<A>,
               name_type<B>
@@ -104,42 +106,60 @@ struct BinaryOperationNode final : public Node {
 
 using NodeFactory = NodePtr (*)(std::string_view, std::size_t);
 
+enum class Associativity : bool {
+  Left,
+  Right,
+};
+
 struct OperationInfo {
   NodeFactory factory;
   std::string_view name;
+  Associativity associativity;
 
   template <class F>
-  constexpr OperationInfo(F) :
+  constexpr OperationInfo(F, Associativity assoc) :
     factory([](std::string_view expr, std::size_t pos) -> NodePtr {
       return std::make_unique<BinaryOperationNode<F>>(expr, pos);
     }),
-    name(name_type<F>) {}
+    name(name_type<F>),
+    associativity(assoc) {}
 };
 
-static constexpr std::array<OperationInfo, 13> operations = {
-  std::logical_or{},
-  std::logical_and{},
-  std::greater_equal{},
-  std::less_equal{},
-  std::greater{},
-  std::less{},
-  std::equal_to{},
-  std::not_equal_to{},
-  std::plus{},
-  std::minus{},
-  std::multiplies{},
-  std::divides{},
-  std::modulus{},
-};
+static constexpr std::array<OperationInfo, 13> operations = {{
+  {std::logical_or{}, Associativity::Left},
+  {std::logical_and{}, Associativity::Left},
+  {std::greater_equal{}, Associativity::Left},
+  {std::less_equal{}, Associativity::Left},
+  {std::greater{}, Associativity::Left},
+  {std::less{}, Associativity::Left},
+  {std::equal_to{}, Associativity::Left},
+  {std::not_equal_to{}, Associativity::Left},
+  {std::plus{}, Associativity::Left},
+  {std::minus{}, Associativity::Left},
+  {std::multiplies{}, Associativity::Left},
+  {std::divides{}, Associativity::Left},
+  {std::modulus{}, Associativity::Left},
+}};
 
 // necessary to avoid ugly static_cast<unsigned char> everywhere
 constexpr auto is_alnum = [](unsigned char c) { return std::isalnum(c); };
 constexpr auto is_digit = [](unsigned char c) { return std::isdigit(c); };
 constexpr auto is_space = [](unsigned char c) { return std::isspace(c); };
 
-std::size_t handle_unary_minus(std::string_view expr, std::size_t pos) {
-  while (pos != std::string_view::npos && (pos == 0 || !isalnum(expr[pos - 1])))
-    pos = expr.find("-", pos + 1);
+std::string_view trim(std::string_view sv) {
+  auto start = sr::find_if_not(sv, is_space) - sv.begin();
+  auto end = sr::find_last_if_not(sv, is_space).begin() - sv.begin();
+  return sv.substr(start, end - start + 1);
+}
+
+std::size_t skip_unary_minus(std::string_view expr, std::size_t pos) {
+  while (pos != std::string_view::npos) {
+    expr = trim(expr.substr(0, pos));
+    if (!expr.empty() && (expr.back() == ')' || is_alnum(expr.back())))
+      break;
+
+    pos = expr.rfind('-');
+  }
   return pos;
 }
 
@@ -150,21 +170,26 @@ struct FoundOperator {
 
 std::optional<FoundOperator> find_lowest_op(std::string_view expr) {
   for (const auto& operation : operations) {
-    auto pos = expr.find(operation.name);
+    auto pos = operation.associativity == Associativity::Right ?
+      expr.find(operation.name) :
+      expr.rfind(operation.name);
+
     if (operation.name == "-")
-      pos = handle_unary_minus(expr, pos);
+      pos = skip_unary_minus(expr, pos);
 
     if (pos == std::string_view::npos)
       continue;
 
-    int parenCount = 0;
-    for (char c : expr.substr(0, pos))
+    static constexpr auto paren_acc = [](int acc, char c) {
       if (c == ')')
-        parenCount--;
-      else if (c == '(')
-        parenCount++;
+        return acc - 1;
+      if (c == '(')
+        return acc + 1;
+      return acc;
+    };
+    int paren_count = sr::fold_left(expr.substr(0, pos), 0, paren_acc);
 
-    if (parenCount != 0)
+    if (paren_count != 0)
       continue;
 
     return FoundOperator{pos, operation};
@@ -185,21 +210,15 @@ bool balanced(std::string_view expression) {
   return depth == 0;
 }
 
-std::string_view trim(std::string_view sv) {
-  auto start = std::ranges::find_if_not(sv, is_space) - sv.begin();
-  auto end = std::ranges::find_last_if_not(sv, is_space).begin() - sv.begin();
-  return sv.substr(start, end - start + 1);
-}
-
 bool variable_name(std::string_view name) {
   static constexpr std::array<std::string_view, 4> reserved = {
     "false", "true", "inf", "nan"
   };
-  if (std::ranges::contains(reserved, name))
+  if (sr::contains(reserved, name))
     return false;
   if (name.empty() || is_digit(name.front()))
     return false;
-  return std::ranges::all_of(name, [](unsigned char c) {
+  return sr::all_of(name, [](unsigned char c) {
     return is_alnum(c) || c == '_';
   });
 }
