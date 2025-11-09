@@ -66,7 +66,7 @@ struct LiteralNode final : public Node {
 struct VariableNode final : public Node {
   const std::string name;
 
-  VariableNode(std::string _name) : name{std::move(_name)} {}
+  VariableNode(std::string_view _name) : name{_name} {}
   virtual ~VariableNode() override final = default;
   virtual Value evaluate(const Context& ctx) const override final {
     return ctx.at(name);
@@ -146,19 +146,58 @@ constexpr auto is_alnum = [](unsigned char c) { return std::isalnum(c); };
 constexpr auto is_digit = [](unsigned char c) { return std::isdigit(c); };
 constexpr auto is_space = [](unsigned char c) { return std::isspace(c); };
 
+std::string_view ltrim(std::string_view sv) {
+  auto it = sr::find_if_not(sv, is_space);
+  return sv.substr(it - sv.begin());
+}
+
+std::string_view rtrim(std::string_view sv) {
+  auto it = sr::find_last_if_not(sv, is_space).begin();
+  return sv.substr(0, (it - sv.begin()) + 1);
+}
+
 std::string_view trim(std::string_view sv) {
-  auto start = sr::find_if_not(sv, is_space) - sv.begin();
-  auto end = sr::find_last_if_not(sv, is_space).begin() - sv.begin();
-  return sv.substr(start, end - start + 1);
+  return rtrim(ltrim(sv));
+}
+
+int parenthesis_count(std::string_view expr) {
+  return sr::fold_left(expr, 0, [](int acc, char c) {
+    if (c == ')')
+      return acc - 1;
+    if (c == '(')
+      return acc + 1;
+    return acc;
+  });
+}
+
+std::size_t find_operator(std::string_view expr, std::string_view op_name) {
+  std::size_t pos = expr.find(op_name);
+  while (pos != std::string_view::npos) {
+    if (parenthesis_count(expr.substr(0, pos)) == 0)
+      break;
+    pos = expr.find(op_name, pos + 1);
+  }
+  return pos;
+}
+
+std::size_t rfind_operator(std::string_view expr, std::string_view op_name) {
+  std::size_t pos = expr.rfind(op_name);
+  while (pos != std::string_view::npos) {
+    if (parenthesis_count(expr.substr(0, pos)) == 0)
+      break;
+    pos = expr.rfind(op_name, pos - 1);
+  }
+  return pos;
 }
 
 std::size_t skip_unary_minus(std::string_view expr, std::size_t pos) {
   while (pos != std::string_view::npos) {
-    expr = trim(expr.substr(0, pos));
-    if (!expr.empty() && (expr.back() == ')' || is_alnum(expr.back())))
+    expr = rtrim(expr.substr(0, pos));
+    if (!expr.empty() && (expr.back() == ')' || is_alnum(expr.back())) &&
+        parenthesis_count(expr) == 0)
       break;
 
-    pos = expr.rfind('-');
+    pos = rfind_operator(expr, "-");
   }
   return pos;
 }
@@ -171,8 +210,8 @@ struct FoundOperator {
 std::optional<FoundOperator> find_lowest_op(std::string_view expr) {
   for (const auto& operation : operations) {
     auto pos = operation.associativity == Associativity::Right ?
-      expr.find(operation.name) :
-      expr.rfind(operation.name);
+      find_operator(expr, operation.name) :
+      rfind_operator(expr, operation.name);
 
     if (operation.name == "-")
       pos = skip_unary_minus(expr, pos);
@@ -180,34 +219,25 @@ std::optional<FoundOperator> find_lowest_op(std::string_view expr) {
     if (pos == std::string_view::npos)
       continue;
 
-    static constexpr auto paren_acc = [](int acc, char c) {
-      if (c == ')')
-        return acc - 1;
-      if (c == '(')
-        return acc + 1;
-      return acc;
-    };
-    int paren_count = sr::fold_left(expr.substr(0, pos), 0, paren_acc);
-
-    if (paren_count != 0)
-      continue;
-
     return FoundOperator{pos, operation};
   }
   return std::nullopt;
 }
 
-bool balanced(std::string_view expression) {
-  int depth = 0;
-  for (char c : expression) {
+bool encapsulating_parenthesis(std::string_view expr) {
+  if (!expr.starts_with('(') || !expr.ends_with(')'))
+    return false;
+
+  int depth = 1;
+  for (char c : expr.substr(1, expr.size() - 2)) {
     if (c == '(')
       ++depth;
     else if (c == ')')
       --depth;
-    if (depth < 0)
+    if (depth == 0)
       return false;
   }
-  return depth == 0;
+  return true;
 }
 
 bool variable_name(std::string_view name) {
@@ -258,7 +288,7 @@ Value parse_value(std::string_view expr) {
 
 NodePtr parse_expression(std::string_view expr) {
   expr = trim(expr);
-  while (expr.starts_with('(') && expr.ends_with(')') && balanced(expr))
+  while (encapsulating_parenthesis(expr))
     expr = trim(expr.substr(1, expr.size() - 2));
 
   auto result = find_lowest_op(expr);
@@ -268,6 +298,6 @@ NodePtr parse_expression(std::string_view expr) {
   }
 
   if (variable_name(expr))
-    return std::make_unique<VariableNode>(std::string(expr));
+    return std::make_unique<VariableNode>(expr);
   return std::make_unique<LiteralNode>(parse_value(expr));
 }
