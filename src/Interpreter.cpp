@@ -286,13 +286,17 @@ NodePtr parse_expression(std::string_view expr) {
   while (encapsulating_parenthesis(expr))
     expr = sv::trim(expr.substr(1, expr.size() - 2));
 
+  try {
+    return std::make_unique<LiteralNode>(parse_value(expr));
+  } catch (const std::invalid_argument&) {}
+
+  try {
+    return std::make_unique<VariableNode>(expr);
+  } catch (const std::invalid_argument&) {}
+
   for (const auto& op : operations)
     if (auto pos = op.finder(expr); pos != std::string_view::npos)
       return op.factory(expr, pos);
 
-  try {
-    return std::make_unique<LiteralNode>(parse_value(expr));
-  } catch (const std::invalid_argument&) {
-    return std::make_unique<VariableNode>(expr);
-  }
+  throw std::invalid_argument(std::format("Invalid expression: '{}'", expr));
 }
