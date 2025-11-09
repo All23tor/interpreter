@@ -4,11 +4,11 @@
 #include <memory>
 #include <print>
 
-static constexpr std::array value_names = {
-  "unit", "bool", "int", "float", "string"
-};
 template <>
 struct std::formatter<Value> {
+  static constexpr std::array value_names = {
+    "unit", "bool", "int", "float", "string"
+  };
   constexpr auto parse(std::format_parse_context& ctx) {
     return ctx.begin();
   }
@@ -16,9 +16,9 @@ struct std::formatter<Value> {
     return std::visit(
       [idx = v.v.index(), &ctx]<class T>(const T& arg) {
         if constexpr (std::is_same_v<T, std::string>)
-          return std::format_to(ctx.out(), "{} '{}'", value_names[idx], arg);
+          return std::format_to(ctx.out(), "{} {:?}", value_names[idx], arg);
         else if constexpr (std::is_same_v<T, std::monostate>)
-          return std::format_to(ctx.out(), "{}", value_names[idx]);
+          return std::format_to(ctx.out(), "{} ()", value_names[idx]);
         else
           return std::format_to(ctx.out(), "{} {}", value_names[idx], arg);
       },
@@ -27,54 +27,20 @@ struct std::formatter<Value> {
   }
 };
 
-Value force_parse(const std::string var_name) {
-  std::string value;
-
-  while (true)
-    try {
-      return parse_value(value);
-    } catch (std::invalid_argument& ia) {
-      std::print("{}: ", var_name);
-      std::getline(std::cin, value);
-    }
-}
-
-Value force_evaluate(const std::unique_ptr<Node>& tree) {
-  Context context;
-
-  while (true)
-    try {
-      return tree->evaluate(context);
-    } catch (const std::string& var_name) {
-      context[var_name] = force_parse(var_name);
-    }
-}
-
-void interpret(std::string_view expression) {
-  std::unique_ptr<Node> tree;
-
-  try {
-    tree = parse_expression(expression);
-  } catch (std::invalid_argument& ia) {
-    std::println(std::cerr, "{}", ia.what());
-    return;
-  }
-
-  try {
-    std::println("  {}", force_evaluate(tree));
-  } catch (std::exception& e) {
-    std::println(std::cerr, "{}", e.what());
-  }
-}
-
 int main() {
+  Context context;
   std::string expression;
   while (!std::cin.eof()) {
     std::print(std::clog, "> ");
     std::getline(std::cin, expression);
     if (expression.empty())
       continue;
-    interpret(expression);
+    try {
+      std::unique_ptr<Node> tree = parse_expression(expression);
+      std::println("  {}", tree->evaluate(context));
+    } catch (std::exception& e) {
+      std::println(std::cerr, "{}", e.what());
+    }
   }
-  std::println();
+  std::println("^D Quitting");
 }
