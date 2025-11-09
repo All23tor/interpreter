@@ -29,6 +29,7 @@ using name_types = std::tuple<
   NameType<bool, CompStr{"bool"}>,
   NameType<std::string, CompStr{"string"}>,
   NameType<std::monostate, CompStr{"unit"}>,
+  NameType<Ref, CompStr{"ref"}>,
   NameType<std::logical_or<>, CompStr{"||"}>,
   NameType<std::logical_and<>, CompStr{"&&"}>,
   NameType<std::greater_equal<>, CompStr{">="}>,
@@ -67,6 +68,12 @@ std::string_view rtrim(std::string_view sv) {
 std::string_view trim(std::string_view sv) {
   return rtrim(ltrim(sv));
 }
+bool is_variable_name(std::string_view name) {
+  return !name.empty() && !sv::is_digit(name.front()) &&
+    std::ranges::all_of(name, [](unsigned char c) {
+      return sv::is_alnum(c) || c == '_';
+    });
+}
 } // namespace sv
 
 using NodePtr = std::unique_ptr<Node>;
@@ -74,8 +81,8 @@ struct LiteralNode final : public Node {
   const Value value;
 
   LiteralNode(Value _value) : value{std::move(_value)} {}
-  virtual ~LiteralNode() override final = default;
-  virtual Value evaluate(Context&) const override final {
+  virtual ~LiteralNode() override = default;
+  virtual Value evaluate(Context&) const override {
     return value;
   }
 };
@@ -85,21 +92,14 @@ struct VariableNode final : public Node {
 
   VariableNode(std::string_view _name) :
     name([](auto _name) {
-      if (_name.empty())
-        throw std::invalid_argument("Expected something, got nothing");
-
-      bool is_variable_name = !sv::is_digit(_name.front()) &&
-        std::ranges::all_of(_name, [](unsigned char c) {
-          return sv::is_alnum(c) || c == '_';
-        });
-      if (!is_variable_name)
+      if (!sv::is_variable_name(_name))
         throw std::invalid_argument(
-          std::format("{} is not a valid variable name", _name)
+          std::format("'{}' is not a valid variable name", _name)
         );
       return _name;
     }(_name)) {}
-  virtual ~VariableNode() override final = default;
-  virtual Value evaluate(Context& ctx) const override final {
+  virtual ~VariableNode() override = default;
+  virtual Value evaluate(Context& ctx) const override {
     try {
       return ctx.at(name);
     } catch (const std::out_of_range&) {
@@ -197,10 +197,10 @@ std::size_t skip_unary_minus(std::string_view expr, std::size_t pos) {
 template <class F, Associativity A>
 static constexpr OperationInfo binary_info() {
   return {
-    .factory = ([](std::string_view expr, std::size_t pos) -> NodePtr {
+    .factory = [](std::string_view expr, std::size_t pos) -> NodePtr {
       return std::make_unique<BinaryOperationNode<F>>(expr, pos);
-    }),
-    .finder = ([](std::string_view expr) {
+    },
+    .finder = [](std::string_view expr) -> std::size_t {
       std::size_t pos;
       static constexpr auto op_name = name_type<F>();
       if constexpr (A == Associativity::Right)
@@ -210,7 +210,7 @@ static constexpr OperationInfo binary_info() {
       if constexpr (std::is_same_v<F, std::minus<>>)
         pos = skip_unary_minus(expr, pos);
       return pos;
-    })
+    }
   };
 }
 

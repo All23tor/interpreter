@@ -7,7 +7,7 @@
 template <>
 struct std::formatter<Value> {
   static constexpr std::array value_names = {
-    "unit", "bool", "int", "float", "string"
+    "unit", "bool", "int", "float", "string", "ref"
   };
   constexpr auto parse(std::format_parse_context& ctx) {
     return ctx.begin();
@@ -16,11 +16,19 @@ struct std::formatter<Value> {
     return std::visit(
       [idx = v.v.index(), &ctx]<class T>(const T& arg) {
         if constexpr (std::is_same_v<T, std::string>)
-          return std::format_to(ctx.out(), "{} {:?}", value_names[idx], arg);
+          return std::format_to(ctx.out(), "{}: {:?}", value_names[idx], arg);
         else if constexpr (std::is_same_v<T, std::monostate>)
-          return std::format_to(ctx.out(), "{} ()", value_names[idx]);
+          return std::format_to(ctx.out(), "{}: ()", value_names[idx]);
+        else if constexpr (std::is_same_v<T, Ref>)
+          return std::format_to(
+            ctx.out(),
+            "{}: {} -> {}",
+            value_names[idx],
+            arg.ref->first,
+            arg.ref->second
+          );
         else
-          return std::format_to(ctx.out(), "{} {}", value_names[idx], arg);
+          return std::format_to(ctx.out(), "{}: {}", value_names[idx], arg);
       },
       v.v
     );
