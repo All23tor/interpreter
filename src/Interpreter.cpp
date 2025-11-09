@@ -170,6 +170,26 @@ struct LetNode final : public Node {
   }
 };
 
+struct RefNode final : public Node {
+  static constexpr std::string_view op_name = "&";
+  const std::string name;
+
+  explicit RefNode(std::string_view _name) :
+    name([](auto _name) {
+      if (!sv::is_variable_name(_name))
+        throw std::invalid_argument(
+          std::format("'{}' is not a valid variable name", _name)
+        );
+      return _name;
+    }(_name.substr(op_name.size()))) {}
+  virtual ~RefNode() override = default;
+  virtual Value evaluate(Context& ctx) const override {
+    if (auto it = ctx.find(name); it != ctx.end())
+      return {Ref{it}};
+    throw std::runtime_error(std::format("{} was not declared", name));
+  }
+};
+
 enum class Associativity : bool {
   Left,
   Right,
@@ -254,6 +274,15 @@ static constexpr OperationInfo let_info = {
     return expr.starts_with(op_name) ? 0 : std::string_view::npos;
   }
 };
+static constexpr OperationInfo ref_info = {
+  .factory = [](std::string_view expr, std::size_t) -> NodePtr {
+    return std::make_unique<RefNode>(expr);
+  },
+  .finder = [](std::string_view expr) -> std::size_t {
+    static constexpr auto op_name = RefNode::op_name;
+    return expr.starts_with(op_name) ? 0 : std::string_view::npos;
+  }
+};
 
 NodePtr make_operator_node(std::string_view expr) {
   static constexpr std::array operations = {
@@ -271,6 +300,7 @@ NodePtr make_operator_node(std::string_view expr) {
     binary_info<std::multiplies<>, Associativity::Left>(),
     binary_info<std::divides<>, Associativity::Left>(),
     binary_info<std::modulus<>, Associativity::Left>(),
+    ref_info,
     let_info,
   };
   for (const auto& op : operations)
