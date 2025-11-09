@@ -26,6 +26,8 @@ constexpr std::string_view name_type<bool> = "bool";
 template <>
 constexpr std::string_view name_type<std::string> = "string";
 template <>
+constexpr std::string_view name_type<std::monostate> = "unit";
+template <>
 constexpr std::string_view name_type<std::logical_or<>> = "||";
 template <>
 constexpr std::string_view name_type<std::logical_and<>> = "&&";
@@ -58,7 +60,7 @@ struct LiteralNode final : public Node {
 
   LiteralNode(Value _value) : value{std::move(_value)} {}
   virtual ~LiteralNode() override final = default;
-  virtual Value evaluate(const Context&) const override final {
+  virtual Value evaluate(Context&) const override final {
     return value;
   }
 };
@@ -68,8 +70,8 @@ struct VariableNode final : public Node {
 
   VariableNode(std::string_view _name) : name{_name} {}
   virtual ~VariableNode() override final = default;
-  virtual Value evaluate(const Context& ctx) const override final {
-    return ctx.at(name);
+  virtual Value evaluate(Context& ctx) const override final {
+    return ctx[name];
   }
 };
 
@@ -83,7 +85,7 @@ struct BinaryOperationNode final : public Node {
     left(parse_expression(expr.substr(0, pos))),
     right(parse_expression(expr.substr(pos + op_name.size()))) {}
   virtual ~BinaryOperationNode() override = default;
-  virtual Value evaluate(const Context& ctx) const override {
+  virtual Value evaluate(Context& ctx) const override {
     return std::visit(
       []<class A, class B>(const A& a, const B& b) -> Value {
         if constexpr (requires { F{}(a, b); })

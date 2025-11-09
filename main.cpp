@@ -4,7 +4,9 @@
 #include <memory>
 #include <print>
 
-static constexpr std::array value_names = {"bool", "int", "float", "string"};
+static constexpr std::array value_names = {
+  "unit", "bool", "int", "float", "string"
+};
 template <>
 struct std::formatter<Value> {
   constexpr auto parse(std::format_parse_context& ctx) {
@@ -12,8 +14,13 @@ struct std::formatter<Value> {
   }
   auto format(const Value& v, std::format_context& ctx) const {
     return std::visit(
-      [idx = v.v.index(), &ctx](auto&& arg) {
-        return std::format_to(ctx.out(), "{} {}", value_names[idx], arg);
+      [idx = v.v.index(), &ctx]<class T>(const T& arg) {
+        if constexpr (std::is_same_v<T, std::string>)
+          return std::format_to(ctx.out(), "{} '{}'", value_names[idx], arg);
+        else if constexpr (std::is_same_v<T, std::monostate>)
+          return std::format_to(ctx.out(), "{}", value_names[idx]);
+        else
+          return std::format_to(ctx.out(), "{} {}", value_names[idx], arg);
       },
       v.v
     );
