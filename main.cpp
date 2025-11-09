@@ -21,11 +21,7 @@ struct std::formatter<Value> {
           return std::format_to(ctx.out(), "{}: ()", value_names[idx]);
         else if constexpr (std::is_same_v<T, Ref>)
           return std::format_to(
-            ctx.out(),
-            "{}: {} -> {}",
-            value_names[idx],
-            arg.ref->first,
-            arg.ref->second
+            ctx.out(), "{}: {}", value_names[idx], arg.ref->first
           );
         else
           return std::format_to(ctx.out(), "{}: {}", value_names[idx], arg);

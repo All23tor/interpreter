@@ -11,6 +11,13 @@
 #include <utility>
 
 namespace {
+struct Assign {
+  template <class T>
+  Value operator()(Ref ref, const T& value) {
+    return ref.ref->second = {value};
+  }
+};
+
 template <std::size_t Sz>
 struct CompStr {
   char str[Sz];
@@ -24,25 +31,26 @@ struct NameType {
   static constexpr auto N = _N.str;
 };
 using name_types = std::tuple<
-  NameType<int, CompStr{"int"}>,
-  NameType<float, CompStr{"float"}>,
-  NameType<bool, CompStr{"bool"}>,
-  NameType<std::string, CompStr{"string"}>,
-  NameType<std::monostate, CompStr{"unit"}>,
-  NameType<Ref, CompStr{"ref"}>,
-  NameType<std::logical_or<>, CompStr{"||"}>,
-  NameType<std::logical_and<>, CompStr{"&&"}>,
-  NameType<std::greater_equal<>, CompStr{">="}>,
-  NameType<std::less_equal<>, CompStr{"<="}>,
-  NameType<std::greater<>, CompStr{">"}>,
-  NameType<std::less<>, CompStr{"<"}>,
-  NameType<std::equal_to<>, CompStr{"=="}>,
-  NameType<std::not_equal_to<>, CompStr{"!="}>,
-  NameType<std::plus<>, CompStr{"+"}>,
-  NameType<std::minus<>, CompStr{"-"}>,
-  NameType<std::multiplies<>, CompStr{"*"}>,
-  NameType<std::divides<>, CompStr{"/"}>,
-  NameType<std::modulus<>, CompStr{"%"}>>;
+  NameType<int, "int">,
+  NameType<float, "float">,
+  NameType<bool, "bool">,
+  NameType<std::string, "string">,
+  NameType<std::monostate, "unit">,
+  NameType<Ref, "ref">,
+  NameType<std::logical_or<>, "||">,
+  NameType<std::logical_and<>, "&&">,
+  NameType<std::greater_equal<>, ">=">,
+  NameType<std::less_equal<>, "<=">,
+  NameType<std::greater<>, ">">,
+  NameType<std::less<>, "<">,
+  NameType<std::equal_to<>, "==">,
+  NameType<std::not_equal_to<>, "!=">,
+  NameType<std::plus<>, "+">,
+  NameType<std::minus<>, "-">,
+  NameType<std::multiplies<>, "*">,
+  NameType<std::divides<>, "/">,
+  NameType<std::modulus<>, "%">,
+  NameType<Assign, "=">>;
 template <class T, std::size_t I = 0>
 consteval std::string_view name_type() {
   using Nt = std::tuple_element_t<I, name_types>;
@@ -110,7 +118,7 @@ struct VariableNode final : public Node {
 
 template <class F>
 struct BinaryOperationNode final : public Node {
-  static constexpr auto op_name = name_type<F>();
+  static constexpr std::string_view op_name = name_type<F>();
   NodePtr left;
   NodePtr right;
 
@@ -136,6 +144,29 @@ struct BinaryOperationNode final : public Node {
       left->evaluate(ctx).v,
       right->evaluate(ctx).v
     );
+  }
+};
+
+struct LetNode final : public Node {
+  static constexpr std::string_view op_name = "let ";
+  const std::string name;
+
+  explicit LetNode(std::string_view _name) :
+    name([](auto _name) {
+      if (!sv::is_variable_name(_name))
+        throw std::invalid_argument(
+          std::format("'{}' is not a valid variable name", _name)
+        );
+      return _name;
+    }(_name.substr(op_name.size()))) {}
+  virtual ~LetNode() override = default;
+  virtual Value evaluate(Context& ctx) const override {
+    auto [it, inserted] = ctx.insert({name, Value{std::monostate{}}});
+    if (!inserted)
+      throw std::runtime_error(
+        std::format("Variable '{}' already declared", name)
+      );
+    return Value{Ref{it}};
   }
 };
 
@@ -202,7 +233,7 @@ static constexpr OperationInfo binary_info() {
     },
     .finder = [](std::string_view expr) -> std::size_t {
       std::size_t pos;
-      static constexpr auto op_name = name_type<F>();
+      static constexpr auto op_name = BinaryOperationNode<F>::op_name;
       if constexpr (A == Associativity::Right)
         pos = find_operator(expr, op_name);
       else
@@ -214,8 +245,19 @@ static constexpr OperationInfo binary_info() {
   };
 }
 
+static constexpr OperationInfo let_info = {
+  .factory = [](std::string_view expr, std::size_t) -> NodePtr {
+    return std::make_unique<LetNode>(expr);
+  },
+  .finder = [](std::string_view expr) -> std::size_t {
+    static constexpr auto op_name = LetNode::op_name;
+    return expr.starts_with(op_name) ? 0 : std::string_view::npos;
+  }
+};
+
 NodePtr make_operator_node(std::string_view expr) {
   static constexpr std::array operations = {
+    binary_info<Assign, Associativity::Right>(),
     binary_info<std::logical_or<>, Associativity::Left>(),
     binary_info<std::logical_and<>, Associativity::Left>(),
     binary_info<std::greater_equal<>, Associativity::Left>(),
@@ -228,7 +270,8 @@ NodePtr make_operator_node(std::string_view expr) {
     binary_info<std::minus<>, Associativity::Left>(),
     binary_info<std::multiplies<>, Associativity::Left>(),
     binary_info<std::divides<>, Associativity::Left>(),
-    binary_info<std::modulus<>, Associativity::Left>()
+    binary_info<std::modulus<>, Associativity::Left>(),
+    let_info,
   };
   for (const auto& op : operations)
     if (auto pos = op.finder(expr); pos != std::string_view::npos)
