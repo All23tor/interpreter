@@ -56,21 +56,17 @@ namespace sv {
 constexpr auto is_alnum = [](unsigned char c) { return std::isalnum(c); };
 constexpr auto is_digit = [](unsigned char c) { return std::isdigit(c); };
 constexpr auto is_space = [](unsigned char c) { return std::isspace(c); };
-
 std::string_view ltrim(std::string_view sv) {
   auto it = std::ranges::find_if_not(sv, is_space);
   return sv.substr(it - sv.begin());
 }
-
 std::string_view rtrim(std::string_view sv) {
   auto it = std::ranges::find_last_if_not(sv, is_space).begin();
   return sv.substr(0, (it - sv.begin()) + 1);
 }
-
 std::string_view trim(std::string_view sv) {
   return rtrim(ltrim(sv));
 }
-
 } // namespace sv
 
 using NodePtr = std::unique_ptr<Node>;
@@ -218,24 +214,30 @@ static constexpr OperationInfo binary_info() {
   };
 }
 
-static constexpr std::array operations = {
-  binary_info<std::logical_or<>, Associativity::Left>(),
-  binary_info<std::logical_and<>, Associativity::Left>(),
-  binary_info<std::greater_equal<>, Associativity::Left>(),
-  binary_info<std::less_equal<>, Associativity::Left>(),
-  binary_info<std::greater<>, Associativity::Left>(),
-  binary_info<std::less<>, Associativity::Left>(),
-  binary_info<std::equal_to<>, Associativity::Left>(),
-  binary_info<std::not_equal_to<>, Associativity::Left>(),
-  binary_info<std::plus<>, Associativity::Left>(),
-  binary_info<std::minus<>, Associativity::Left>(),
-  binary_info<std::multiplies<>, Associativity::Left>(),
-  binary_info<std::divides<>, Associativity::Left>(),
-  binary_info<std::modulus<>, Associativity::Left>()
-};
+NodePtr make_operator_node(std::string_view expr) {
+  static constexpr std::array operations = {
+    binary_info<std::logical_or<>, Associativity::Left>(),
+    binary_info<std::logical_and<>, Associativity::Left>(),
+    binary_info<std::greater_equal<>, Associativity::Left>(),
+    binary_info<std::less_equal<>, Associativity::Left>(),
+    binary_info<std::greater<>, Associativity::Left>(),
+    binary_info<std::less<>, Associativity::Left>(),
+    binary_info<std::equal_to<>, Associativity::Left>(),
+    binary_info<std::not_equal_to<>, Associativity::Left>(),
+    binary_info<std::plus<>, Associativity::Left>(),
+    binary_info<std::minus<>, Associativity::Left>(),
+    binary_info<std::multiplies<>, Associativity::Left>(),
+    binary_info<std::divides<>, Associativity::Left>(),
+    binary_info<std::modulus<>, Associativity::Left>()
+  };
+  for (const auto& op : operations)
+    if (auto pos = op.finder(expr); pos != std::string_view::npos)
+      return op.factory(expr, pos);
+  throw std::invalid_argument(std::format("Invalid expression: '{}'", expr));
+}
 
-bool encapsulating_parenthesis(std::string_view expr) {
-  if (expr.size() == 2 || !expr.starts_with('(') || !expr.ends_with(')'))
+bool encapsulated(std::string_view expr) {
+  if (!expr.starts_with('(') || !expr.ends_with(')'))
     return false;
 
   int depth = 1;
@@ -259,7 +261,7 @@ Value parse_value(std::string_view expr) {
   if (expr == "false")
     return {false};
 
-  if (expr.size() >= 2 && expr.front() == '"' && expr.back() == '"')
+  if (expr.starts_with('"') && expr.find('"', 1) + 1 == expr.size())
     return {std::string(expr.substr(1, expr.size() - 2))};
 
   {
@@ -283,20 +285,14 @@ Value parse_value(std::string_view expr) {
 
 NodePtr parse_expression(std::string_view expr) {
   expr = sv::trim(expr);
-  while (encapsulating_parenthesis(expr))
+  while (expr.size() > 2 && encapsulated(expr))
     expr = sv::trim(expr.substr(1, expr.size() - 2));
 
   try {
     return std::make_unique<LiteralNode>(parse_value(expr));
   } catch (const std::invalid_argument&) {}
-
   try {
     return std::make_unique<VariableNode>(expr);
   } catch (const std::invalid_argument&) {}
-
-  for (const auto& op : operations)
-    if (auto pos = op.finder(expr); pos != std::string_view::npos)
-      return op.factory(expr, pos);
-
-  throw std::invalid_argument(std::format("Invalid expression: '{}'", expr));
+  return make_operator_node(expr);
 }
