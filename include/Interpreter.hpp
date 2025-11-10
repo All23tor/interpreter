@@ -1,19 +1,36 @@
 #include <map>
 #include <memory>
+#include <utility>
 #include <variant>
 
 struct Value;
-using Context = std::map<std::string, Value>;
-struct Ref {
-  Context::iterator ref;
+struct Ptr {
+  Value* ptr;
 };
 struct Value {
-  std::variant<std::monostate, bool, int, float, std::string, Ref> v;
+  std::variant<std::monostate, bool, int, float, std::string, Ptr> v;
+  template <class T>
+  Value(T&& arg) : v(std::forward<T>(arg)) {}
+};
+using Context = std::map<std::string, Value>;
+struct Ref {
+  Value* ref;
+  operator Value&() & {
+    return *ref;
+  }
+  operator const Value&() const& {
+    return *ref;
+  }
+};
+struct Expression {
+  std::variant<Value, Ref> v;
+  template <class T>
+  Expression(T&& arg) : v(std::forward<T>(arg)) {}
 };
 
 struct Node {
   virtual ~Node() = default;
-  virtual Value evaluate(Context&) const = 0;
+  virtual Expression evaluate(Context&) const = 0;
 };
 
 Value parse_value(std::string_view);

@@ -12,10 +12,22 @@
 
 namespace {
 struct Assign {
-  template <class T>
-  Value operator()(Ref ref, const T& value) {
-    return ref.ref->second = {value};
+  Ref operator()(Ref ref, Value val) {
+    *ref.ref = val;
+    return ref;
   }
+  Ref operator()(Ref lhs, Ref rhs) {
+    *lhs.ref = *rhs.ref;
+    return lhs;
+  }
+};
+struct RefOf {
+  Value operator()(Ref ref) {
+    return Ptr{ref.ref};
+  }
+};
+struct DerefOf {
+  Ref operator()(Value value);
 };
 
 template <std::size_t Sz>
@@ -36,7 +48,9 @@ using name_types = std::tuple<
   NameType<bool, "bool">,
   NameType<std::string, "string">,
   NameType<std::monostate, "unit">,
-  NameType<Ref, "ref">,
+  NameType<Ptr, "ptr">,
+  NameType<Value, "Val">,
+  NameType<Ref, "Ref">,
   NameType<std::logical_or<>, "||">,
   NameType<std::logical_and<>, "&&">,
   NameType<std::greater_equal<>, ">=">,
@@ -50,7 +64,11 @@ using name_types = std::tuple<
   NameType<std::multiplies<>, "*">,
   NameType<std::divides<>, "/">,
   NameType<std::modulus<>, "%">,
-  NameType<Assign, "<-">>;
+  NameType<std::negate<>, "-">,
+  NameType<Assign, "=">,
+  NameType<RefOf, "&">,
+  NameType<DerefOf, "*">>;
+
 template <class T, std::size_t I = 0>
 consteval std::string_view name_type() {
   using Nt = std::tuple_element_t<I, name_types>;
@@ -60,6 +78,104 @@ consteval std::string_view name_type() {
     return name_type<T, I + 1>();
 }
 
+template <class F>
+static constexpr auto adapt_binary = [](const Value& a, const Value& b) {
+  return std::visit(
+    []<class A, class B>(const A& a, const B& b) -> Value {
+      if constexpr (requires { Value{F{}(a, b)}; })
+        return {F{}(a, b)};
+      else
+        throw std::runtime_error(
+          std::format(
+            "Operator '{}' does not support types '{}' and '{}'",
+            name_type<F>(),
+            name_type<A>(),
+            name_type<B>()
+          )
+        );
+    },
+    a.v,
+    b.v
+  );
+};
+template <class F>
+static constexpr auto adapt_unary = [](const Value& val) {
+  return std::visit(
+    []<class A>(const A& a) -> Value {
+      if constexpr (requires { Value{F{}(a)}; })
+        return {F{}(a)};
+      else
+        throw std::runtime_error(
+          std::format(
+            "Operator '{}' does not support type '{}'",
+            name_type<F>(),
+            name_type<A>()
+          )
+        );
+    },
+    val.v
+  );
+};
+} // namespace
+
+static auto operator||(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::logical_or<>>(lhs, rhs);
+}
+static auto operator&&(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::logical_and<>>(lhs, rhs);
+}
+static auto operator>=(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::greater_equal<>>(lhs, rhs);
+}
+static auto operator<=(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::less_equal<>>(lhs, rhs);
+}
+static auto operator>(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::greater<>>(lhs, rhs);
+}
+static auto operator<(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::less<>>(lhs, rhs);
+}
+static auto operator==(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::equal_to<>>(lhs, rhs);
+}
+static auto operator!=(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::not_equal_to<>>(lhs, rhs);
+}
+static auto operator+(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::plus<>>(lhs, rhs);
+}
+static auto operator-(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::minus<>>(lhs, rhs);
+}
+static auto operator*(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::multiplies<>>(lhs, rhs);
+}
+static auto operator/(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::divides<>>(lhs, rhs);
+}
+static auto operator%(const Value& lhs, const Value& rhs) {
+  return adapt_binary<std::modulus<>>(lhs, rhs);
+}
+static auto operator-(const Value& val) {
+  return adapt_unary<std::negate<>>(val);
+}
+
+Ref DerefOf::operator()(Value value) {
+  return std::visit(
+    []<class T>(const T& arg) -> Ref {
+      if constexpr (std::is_same_v<T, Ptr>)
+        return Ref{arg.ptr};
+      else
+        throw std::runtime_error(
+          std::format("Operator * does not support type '{}'", name_type<T>())
+        );
+    },
+    value.v
+  );
+}
+
+namespace {
 namespace sv {
 // necessary to avoid ugly static_cast<unsigned char> everywhere
 constexpr auto is_alnum = [](unsigned char c) { return std::isalnum(c); };
@@ -90,8 +206,8 @@ struct LiteralNode final : public Node {
 
   LiteralNode(Value _value) : value{std::move(_value)} {}
   virtual ~LiteralNode() override = default;
-  virtual Value evaluate(Context&) const override {
-    return value;
+  virtual Expression evaluate(Context&) const override {
+    return {value};
   }
 };
 
@@ -107,12 +223,11 @@ struct VariableNode final : public Node {
       return _name;
     }(_name)) {}
   virtual ~VariableNode() override = default;
-  virtual Value evaluate(Context& ctx) const override {
-    try {
-      return ctx.at(name);
-    } catch (const std::out_of_range&) {
-      throw std::runtime_error(std::format("{} was not declared", name));
-    }
+  virtual Expression evaluate(Context& ctx) const override {
+    auto it = ctx.find(name);
+    if (it == ctx.end())
+      throw std::runtime_error(std::format("'{}' was not declared", name));
+    return {Ref{&it->second}};
   }
 };
 
@@ -126,18 +241,18 @@ struct BinaryOperationNode final : public Node {
     left(parse_expression(expr.substr(0, pos))),
     right(parse_expression(expr.substr(pos + op_name.size()))) {}
   virtual ~BinaryOperationNode() override = default;
-  virtual Value evaluate(Context& ctx) const override {
+  virtual Expression evaluate(Context& ctx) const override {
     auto lhs = left->evaluate(ctx).v;
     auto rhs = right->evaluate(ctx).v;
 
     return std::visit(
-      []<class A, class B>(const A& a, const B& b) -> Value {
+      []<class A, class B>(const A& a, const B& b) -> Expression {
         if constexpr (requires { F{}(a, b); })
-          return {F{}(a, b)};
+          return F{}(a, b);
         else
           throw std::runtime_error(
             std::format(
-              "Operator '{}' does not support types '{}' and '{}'",
+              "Operator '{}' does not support categories '{}' and '{}'",
               name_type<F>(),
               name_type<A>(),
               name_type<B>()
@@ -163,58 +278,41 @@ struct LetNode final : public Node {
       return _name;
     }(_name.substr(op_name.size()))) {}
   virtual ~LetNode() override = default;
-  virtual Value evaluate(Context& ctx) const override {
+  virtual Expression evaluate(Context& ctx) const override {
     auto [it, inserted] = ctx.insert({name, Value{std::monostate{}}});
     if (!inserted)
       throw std::runtime_error(
         std::format("Variable '{}' already declared", name)
       );
-    return Value{Ref{it}};
+    return Ref{&it->second};
   }
 };
 
-struct RefNode final : public Node {
-  static constexpr std::string_view op_name = "&";
-  const std::string name;
-
-  explicit RefNode(std::string_view _name) :
-    name([](auto _name) {
-      if (!sv::is_variable_name(_name))
-        throw std::invalid_argument(
-          std::format("'{}' is not a valid variable name", _name)
-        );
-      return _name;
-    }(_name.substr(op_name.size()))) {}
-  virtual ~RefNode() override = default;
-  virtual Value evaluate(Context& ctx) const override {
-    if (auto it = ctx.find(name); it != ctx.end())
-      return {Ref{it}};
-    throw std::runtime_error(std::format("{} was not declared", name));
-  }
-};
-
-struct DerefNode final : public Node {
-  static constexpr std::string_view op_name = "*";
+template <class F>
+struct UnaryOperationNode final : public Node {
+  static constexpr std::string_view op_name = name_type<F>();
   NodePtr expr;
 
-  explicit DerefNode(std::string_view expr) :
-    expr(parse_expression(expr.substr(op_name.size()))) {}
-  virtual ~DerefNode() override = default;
-  virtual Value evaluate(Context& ctx) const override {
+  UnaryOperationNode(std::string_view _expr) :
+    expr(parse_expression(_expr.substr(op_name.size()))) {}
+  virtual ~UnaryOperationNode() override = default;
+  virtual Expression evaluate(Context& ctx) const override {
+    auto inner = expr->evaluate(ctx).v;
+
     return std::visit(
-      []<class T>(const T& arg) -> Value {
-        if constexpr (requires { *arg.ref; })
-          return arg.ref->second;
+      []<class A>(const A& a) -> Expression {
+        if constexpr (requires { F{}(a); })
+          return F{}(a);
         else
           throw std::runtime_error(
             std::format(
-              "Operator '{}' does not support type '{}'",
-              op_name,
-              name_type<T>()
+              "Operator '{}' does not support category '{}'",
+              name_type<F>(),
+              name_type<A>()
             )
           );
       },
-      expr->evaluate(ctx).v
+      inner
     );
   }
 };
@@ -304,21 +402,14 @@ static constexpr OperationInfo let_info = {
     return expr.starts_with(op_name) ? 0 : std::string_view::npos;
   }
 };
-static constexpr OperationInfo ref_info = {
+
+template <class F>
+static constexpr OperationInfo unary_info = {
   .factory = [](std::string_view expr, std::size_t) -> NodePtr {
-    return std::make_unique<RefNode>(expr);
+    return std::make_unique<UnaryOperationNode<F>>(expr);
   },
   .finder = [](std::string_view expr) -> std::size_t {
-    static constexpr auto op_name = RefNode::op_name;
-    return expr.starts_with(op_name) ? 0 : std::string_view::npos;
-  }
-};
-static constexpr OperationInfo deref_info = {
-  .factory = [](std::string_view expr, std::size_t) -> NodePtr {
-    return std::make_unique<DerefNode>(expr);
-  },
-  .finder = [](std::string_view expr) -> std::size_t {
-    static constexpr auto op_name = DerefNode::op_name;
+    static constexpr auto op_name = UnaryOperationNode<F>::op_name;
     return expr.starts_with(op_name) ? 0 : std::string_view::npos;
   }
 };
@@ -339,8 +430,9 @@ NodePtr make_operator_node(std::string_view expr) {
     binary_info<std::multiplies<>, Associativity::Left>,
     binary_info<std::divides<>, Associativity::Left>,
     binary_info<std::modulus<>, Associativity::Left>,
-    ref_info,
-    deref_info,
+    unary_info<std::negate<>>,
+    unary_info<RefOf>,
+    unary_info<DerefOf>,
     let_info,
   };
   for (const auto& op : operations)

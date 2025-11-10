@@ -5,48 +5,45 @@
 #include <print>
 #include <type_traits>
 
-bool is_self_referential(Ref ref) {
-  return std::visit(
-    [ref]<class T>(const T& arg) {
-      if constexpr (std::is_same_v<T, Ref>)
-        return arg.ref == ref.ref;
-      else
-        return false;
-    },
-    ref.ref->second.v
-  );
-}
-
 template <>
 struct std::formatter<Value> {
   static constexpr std::array value_names = {
-    "unit", "bool", "int", "float", "string", "ref"
+    "unit", "bool", "int", "float", "string", "ptr"
   };
   constexpr auto parse(std::format_parse_context& ctx) {
     return ctx.begin();
   }
-  auto format(const Value& v, std::format_context& ctx) const {
+  auto format(const Value& val, std::format_context& ctx) const {
     return std::visit(
-      [idx = v.v.index(), &ctx]<class T>(const T& arg) {
+      [idx = val.v.index(), &ctx]<class T>(const T& arg) {
         if constexpr (std::is_same_v<T, std::string>)
           return std::format_to(ctx.out(), "{}: {:?}", value_names[idx], arg);
         else if constexpr (std::is_same_v<T, std::monostate>)
           return std::format_to(ctx.out(), "{}: ()", value_names[idx]);
-        else if constexpr (std::is_same_v<T, Ref>)
-          if (is_self_referential(arg))
-            return std::format_to(ctx.out(), "self ref");
-          else
-            return std::format_to(
-              ctx.out(),
-              "{}: {} -> {}",
-              value_names[idx],
-              arg.ref->first,
-              arg.ref->second
-            );
+        else if constexpr (std::is_same_v<T, Ptr>)
+          return std::format_to(ctx.out(), "ptr: {}", *arg.ptr);
         else
           return std::format_to(ctx.out(), "{}: {}", value_names[idx], arg);
       },
-      v.v
+      val.v
+    );
+  }
+};
+
+template <>
+struct std::formatter<Expression> {
+  constexpr auto parse(std::format_parse_context& ctx) {
+    return ctx.begin();
+  }
+  auto format(const Expression& expr, std::format_context& ctx) const {
+    return std::visit(
+      [&ctx]<class T>(const T& arg) {
+        if constexpr (std::is_same_v<T, Ref>)
+          return std::format_to(ctx.out(), "Ref {}", *arg.ref);
+        else
+          return std::format_to(ctx.out(), "{}", arg);
+      },
+      expr.v
     );
   }
 };
