@@ -13,7 +13,7 @@ struct Value {
   Value(T&& arg) : v(std::forward<T>(arg)) {}
 };
 using Context = std::map<std::string, Value>;
-struct Ref {
+struct LValue {
   Value* ref;
   operator Value&() & {
     return *ref;
@@ -22,8 +22,17 @@ struct Ref {
     return *ref;
   }
 };
+struct RValue {
+  Value val;
+  operator Value&() & {
+    return val;
+  }
+  operator const Value&() const& {
+    return val;
+  }
+};
 struct Expression {
-  std::variant<Value, Ref> v;
+  std::variant<RValue, LValue> v;
   template <class T>
   Expression(T&& arg) : v(std::forward<T>(arg)) {}
 };

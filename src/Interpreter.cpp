@@ -12,22 +12,22 @@
 
 namespace {
 struct Assign {
-  Ref operator()(Ref ref, Value val) {
+  LValue operator()(LValue ref, Value val) {
     *ref.ref = val;
     return ref;
   }
-  Ref operator()(Ref lhs, Ref rhs) {
+  LValue operator()(LValue lhs, LValue rhs) {
     *lhs.ref = *rhs.ref;
     return lhs;
   }
 };
 struct RefOf {
-  Value operator()(Ref ref) {
-    return Ptr{ref.ref};
+  RValue operator()(LValue ref) {
+    return RValue{Ptr{ref.ref}};
   }
 };
 struct DerefOf {
-  Ref operator()(Value value);
+  LValue operator()(Value value);
 };
 
 template <std::size_t Sz>
@@ -49,8 +49,8 @@ using name_types = std::tuple<
   NameType<std::string, "string">,
   NameType<std::monostate, "unit">,
   NameType<Ptr, "ptr">,
-  NameType<Value, "Val">,
-  NameType<Ref, "Ref">,
+  NameType<RValue, "rvalue">,
+  NameType<LValue, "lvalue">,
   NameType<std::logical_or<>, "||">,
   NameType<std::logical_and<>, "&&">,
   NameType<std::greater_equal<>, ">=">,
@@ -65,6 +65,7 @@ using name_types = std::tuple<
   NameType<std::divides<>, "/">,
   NameType<std::modulus<>, "%">,
   NameType<std::negate<>, "-">,
+  NameType<std::logical_not<>, "!">,
   NameType<Assign, "=">,
   NameType<RefOf, "&">,
   NameType<DerefOf, "*">>;
@@ -81,9 +82,9 @@ consteval std::string_view name_type() {
 template <class F>
 static constexpr auto adapt_binary = [](const Value& a, const Value& b) {
   return std::visit(
-    []<class A, class B>(const A& a, const B& b) -> Value {
+    []<class A, class B>(const A& a, const B& b) -> RValue {
       if constexpr (requires { Value{F{}(a, b)}; })
-        return {F{}(a, b)};
+        return RValue{F{}(a, b)};
       else
         throw std::runtime_error(
           std::format(
@@ -101,9 +102,9 @@ static constexpr auto adapt_binary = [](const Value& a, const Value& b) {
 template <class F>
 static constexpr auto adapt_unary = [](const Value& val) {
   return std::visit(
-    []<class A>(const A& a) -> Value {
+    []<class A>(const A& a) -> RValue {
       if constexpr (requires { Value{F{}(a)}; })
-        return {F{}(a)};
+        return RValue{F{}(a)};
       else
         throw std::runtime_error(
           std::format(
@@ -160,12 +161,15 @@ static auto operator%(const Value& lhs, const Value& rhs) {
 static auto operator-(const Value& val) {
   return adapt_unary<std::negate<>>(val);
 }
+static auto operator!(const Value& val) {
+  return adapt_unary<std::logical_not<>>(val);
+}
 
-Ref DerefOf::operator()(Value value) {
+LValue DerefOf::operator()(Value value) {
   return std::visit(
-    []<class T>(const T& arg) -> Ref {
+    []<class T>(const T& arg) -> LValue {
       if constexpr (std::is_same_v<T, Ptr>)
-        return Ref{arg.ptr};
+        return LValue{arg.ptr};
       else
         throw std::runtime_error(
           std::format("Operator * does not support type '{}'", name_type<T>())
@@ -177,22 +181,23 @@ Ref DerefOf::operator()(Value value) {
 
 namespace {
 namespace sv {
+using t = std::string_view;
 // necessary to avoid ugly static_cast<unsigned char> everywhere
 constexpr auto is_alnum = [](unsigned char c) { return std::isalnum(c); };
 constexpr auto is_digit = [](unsigned char c) { return std::isdigit(c); };
 constexpr auto is_space = [](unsigned char c) { return std::isspace(c); };
-std::string_view ltrim(std::string_view sv) {
+t ltrim(t sv) {
   auto it = std::ranges::find_if_not(sv, is_space);
   return sv.substr(it - sv.begin());
 }
-std::string_view rtrim(std::string_view sv) {
+t rtrim(t sv) {
   auto it = std::ranges::find_last_if_not(sv, is_space).begin();
   return sv.substr(0, (it - sv.begin()) + 1);
 }
-std::string_view trim(std::string_view sv) {
+t trim(t sv) {
   return rtrim(ltrim(sv));
 }
-bool is_variable_name(std::string_view name) {
+bool is_variable_name(t name) {
   return !name.empty() && !sv::is_digit(name.front()) &&
     std::ranges::all_of(name, [](unsigned char c) {
       return sv::is_alnum(c) || c == '_';
@@ -207,14 +212,14 @@ struct LiteralNode final : public Node {
   LiteralNode(Value _value) : value{std::move(_value)} {}
   virtual ~LiteralNode() override = default;
   virtual Expression evaluate(Context&) const override {
-    return {value};
+    return RValue{value};
   }
 };
 
 struct VariableNode final : public Node {
   const std::string name;
 
-  VariableNode(std::string_view _name) :
+  VariableNode(sv::t _name) :
     name([](auto _name) {
       if (!sv::is_variable_name(_name))
         throw std::invalid_argument(
@@ -227,17 +232,17 @@ struct VariableNode final : public Node {
     auto it = ctx.find(name);
     if (it == ctx.end())
       throw std::runtime_error(std::format("'{}' was not declared", name));
-    return {Ref{&it->second}};
+    return LValue{&it->second};
   }
 };
 
 template <class F>
 struct BinaryOperationNode final : public Node {
-  static constexpr std::string_view op_name = name_type<F>();
+  static constexpr sv::t op_name = name_type<F>();
   NodePtr left;
   NodePtr right;
 
-  BinaryOperationNode(std::string_view expr, std::size_t pos) :
+  BinaryOperationNode(sv::t expr, std::size_t pos) :
     left(parse_expression(expr.substr(0, pos))),
     right(parse_expression(expr.substr(pos + op_name.size()))) {}
   virtual ~BinaryOperationNode() override = default;
@@ -266,10 +271,10 @@ struct BinaryOperationNode final : public Node {
 };
 
 struct LetNode final : public Node {
-  static constexpr std::string_view op_name = "let ";
+  static constexpr sv::t op_name = "let ";
   const std::string name;
 
-  explicit LetNode(std::string_view _name) :
+  explicit LetNode(sv::t _name) :
     name([](auto _name) {
       if (!sv::is_variable_name(_name))
         throw std::invalid_argument(
@@ -284,16 +289,16 @@ struct LetNode final : public Node {
       throw std::runtime_error(
         std::format("Variable '{}' already declared", name)
       );
-    return Ref{&it->second};
+    return LValue{&it->second};
   }
 };
 
 template <class F>
 struct UnaryOperationNode final : public Node {
-  static constexpr std::string_view op_name = name_type<F>();
+  static constexpr sv::t op_name = name_type<F>();
   NodePtr expr;
 
-  UnaryOperationNode(std::string_view _expr) :
+  UnaryOperationNode(sv::t _expr) :
     expr(parse_expression(_expr.substr(op_name.size()))) {}
   virtual ~UnaryOperationNode() override = default;
   virtual Expression evaluate(Context& ctx) const override {
@@ -322,15 +327,15 @@ enum class Associativity : bool {
   Right,
 };
 
-using NodeFactory = NodePtr (*)(std::string_view, std::size_t);
-using OperationFinder = std::size_t (*)(std::string_view);
+using NodeFactory = NodePtr (*)(sv::t, std::size_t);
+using OperationFinder = std::size_t (*)(sv::t);
 
 struct OperationInfo {
   NodeFactory factory;
   OperationFinder finder;
 };
 
-int parenthesis_count(std::string_view expr) {
+int parenthesis_count(sv::t expr) {
   return std::ranges::fold_left(expr, 0, [](int acc, char c) {
     if (c == ')')
       return acc - 1;
@@ -340,9 +345,9 @@ int parenthesis_count(std::string_view expr) {
   });
 }
 
-auto find_operator(std::string_view expr, std::string_view op_name) {
+auto find_operator(sv::t expr, sv::t op_name) {
   std::size_t pos = expr.find(op_name);
-  while (pos != std::string_view::npos) {
+  while (pos != sv::t::npos) {
     if (parenthesis_count(expr.substr(0, pos)) == 0)
       break;
     pos = expr.find(op_name, pos + 1);
@@ -350,9 +355,9 @@ auto find_operator(std::string_view expr, std::string_view op_name) {
   return pos;
 }
 
-auto rfind_operator(std::string_view expr, std::string_view op_name) {
+auto rfind_operator(sv::t expr, sv::t op_name) {
   std::size_t pos = expr.rfind(op_name);
-  while (pos != std::string_view::npos) {
+  while (pos != sv::t::npos) {
     if (parenthesis_count(expr.substr(0, pos)) == 0)
       break;
     pos = expr.rfind(op_name, pos - 1);
@@ -360,10 +365,8 @@ auto rfind_operator(std::string_view expr, std::string_view op_name) {
   return pos;
 }
 
-std::size_t skip_unary_operator(
-  std::string_view expr, std::size_t pos, std::string_view name
-) {
-  while (pos != std::string_view::npos) {
+std::size_t skip_unary_operator(sv::t expr, std::size_t pos, sv::t name) {
+  while (pos != sv::t::npos) {
     expr = sv::rtrim(expr.substr(0, pos));
     if (!expr.empty() && (expr.back() == ')' || sv::is_alnum(expr.back())) &&
         parenthesis_count(expr) == 0)
@@ -376,10 +379,10 @@ std::size_t skip_unary_operator(
 
 template <class F, Associativity A>
 static constexpr OperationInfo binary_info = {
-  .factory = [](std::string_view expr, std::size_t pos) -> NodePtr {
+  .factory = [](sv::t expr, std::size_t pos) -> NodePtr {
     return std::make_unique<BinaryOperationNode<F>>(expr, pos);
   },
-  .finder = [](std::string_view expr) -> std::size_t {
+  .finder = [](sv::t expr) -> std::size_t {
     std::size_t pos;
     static constexpr auto op_name = BinaryOperationNode<F>::op_name;
     if constexpr (A == Associativity::Right)
@@ -394,27 +397,44 @@ static constexpr OperationInfo binary_info = {
 };
 
 static constexpr OperationInfo let_info = {
-  .factory = [](std::string_view expr, std::size_t) -> NodePtr {
+  .factory = [](sv::t expr, std::size_t) -> NodePtr {
     return std::make_unique<LetNode>(expr);
   },
-  .finder = [](std::string_view expr) -> std::size_t {
+  .finder = [](sv::t expr) -> std::size_t {
     static constexpr auto op_name = LetNode::op_name;
-    return expr.starts_with(op_name) ? 0 : std::string_view::npos;
+    return expr.starts_with(op_name) ? 0 : sv::t::npos;
+  }
+};
+
+static constexpr OperationInfo assign_info = {
+  .factory = [](sv::t expr, std::size_t pos) -> NodePtr {
+    return std::make_unique<BinaryOperationNode<Assign>>(expr, pos);
+  },
+  .finder = [](sv::t expr) -> std::size_t {
+    static constexpr auto op_name = BinaryOperationNode<Assign>::op_name;
+    auto pos = expr.find(op_name);
+    while (pos != sv::t::npos) {
+      if (parenthesis_count(expr.substr(0, pos)) == 0 &&
+          (pos + 1 >= expr.size() || expr[pos + 1] != '='))
+        break;
+      pos = expr.find(op_name, pos + 1);
+    }
+    return pos;
   }
 };
 
 template <class F>
 static constexpr OperationInfo unary_info = {
-  .factory = [](std::string_view expr, std::size_t) -> NodePtr {
+  .factory = [](sv::t expr, std::size_t) -> NodePtr {
     return std::make_unique<UnaryOperationNode<F>>(expr);
   },
-  .finder = [](std::string_view expr) -> std::size_t {
+  .finder = [](sv::t expr) -> std::size_t {
     static constexpr auto op_name = UnaryOperationNode<F>::op_name;
-    return expr.starts_with(op_name) ? 0 : std::string_view::npos;
+    return expr.starts_with(op_name) ? 0 : sv::t::npos;
   }
 };
 
-NodePtr make_operator_node(std::string_view expr) {
+NodePtr make_operator_node(sv::t expr) {
   static constexpr std::array operations = {
     binary_info<Assign, Associativity::Right>,
     binary_info<std::logical_or<>, Associativity::Left>,
@@ -431,17 +451,18 @@ NodePtr make_operator_node(std::string_view expr) {
     binary_info<std::divides<>, Associativity::Left>,
     binary_info<std::modulus<>, Associativity::Left>,
     unary_info<std::negate<>>,
+    unary_info<std::logical_not<>>,
     unary_info<RefOf>,
     unary_info<DerefOf>,
     let_info,
   };
   for (const auto& op : operations)
-    if (auto pos = op.finder(expr); pos != std::string_view::npos)
+    if (auto pos = op.finder(expr); pos != sv::t::npos)
       return op.factory(expr, pos);
   throw std::invalid_argument(std::format("Invalid expression: '{}'", expr));
 }
 
-bool encapsulated(std::string_view expr) {
+bool encapsulated(sv::t expr) {
   if (!expr.starts_with('(') || !expr.ends_with(')'))
     return false;
 
@@ -458,7 +479,7 @@ bool encapsulated(std::string_view expr) {
 }
 } // namespace
 
-Value parse_value(std::string_view expr) {
+Value parse_value(sv::t expr) {
   if (expr == "()")
     return {std::monostate{}};
   if (expr == "true")
@@ -488,7 +509,7 @@ Value parse_value(std::string_view expr) {
   throw std::invalid_argument(std::format("Invalid literal: '{}'", expr));
 }
 
-NodePtr parse_expression(std::string_view expr) {
+NodePtr parse_expression(sv::t expr) {
   expr = sv::trim(expr);
   while (expr.size() > 2 && encapsulated(expr))
     expr = sv::trim(expr.substr(1, expr.size() - 2));

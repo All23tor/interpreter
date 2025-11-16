@@ -7,9 +7,6 @@
 
 template <>
 struct std::formatter<Value> {
-  static constexpr std::array value_names = {
-    "unit", "bool", "int", "float", "string", "ptr"
-  };
   constexpr auto parse(std::format_parse_context& ctx) {
     return ctx.begin();
   }
@@ -17,13 +14,15 @@ struct std::formatter<Value> {
     return std::visit(
       [idx = val.v.index(), &ctx]<class T>(const T& arg) {
         if constexpr (std::is_same_v<T, std::string>)
-          return std::format_to(ctx.out(), "{}: {:?}", value_names[idx], arg);
+          return std::format_to(ctx.out(), "{:?}", arg);
         else if constexpr (std::is_same_v<T, std::monostate>)
-          return std::format_to(ctx.out(), "{}: ()", value_names[idx]);
+          return std::format_to(ctx.out(), "()");
         else if constexpr (std::is_same_v<T, Ptr>)
-          return std::format_to(ctx.out(), "ptr: {}", *arg.ptr);
+          return std::format_to(ctx.out(), "ptr -> {}", *arg.ptr);
+        else if constexpr (std::is_same_v<T, float>)
+          return std::format_to(ctx.out(), "{:#}", arg);
         else
-          return std::format_to(ctx.out(), "{}: {}", value_names[idx], arg);
+          return std::format_to(ctx.out(), "{}", arg);
       },
       val.v
     );
@@ -37,12 +36,7 @@ struct std::formatter<Expression> {
   }
   auto format(const Expression& expr, std::format_context& ctx) const {
     return std::visit(
-      [&ctx]<class T>(const T& arg) {
-        if constexpr (std::is_same_v<T, Ref>)
-          return std::format_to(ctx.out(), "Ref {}", *arg.ref);
-        else
-          return std::format_to(ctx.out(), "{}", arg);
-      },
+      [&ctx](const Value& arg) { return std::format_to(ctx.out(), "{}", arg); },
       expr.v
     );
   }
@@ -53,7 +47,7 @@ int main() {
   std::string expression;
   while (!std::cin.eof()) {
     std::print(std::clog, "> ");
-    std::getline(std::cin, expression);
+    std::getline(std::cin, expression, ';');
     if (expression.empty())
       continue;
     try {
