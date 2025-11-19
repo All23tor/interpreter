@@ -2,6 +2,7 @@
 #include <memory>
 #include <utility>
 #include <variant>
+#include <vector>
 
 struct Value;
 struct Ptr {
@@ -12,7 +13,6 @@ struct Value {
   template <class T>
   Value(T&& arg) : v(std::forward<T>(arg)) {}
 };
-using Context = std::map<std::string, Value>;
 struct LValue {
   Value* ref;
   operator Value&() & {
@@ -35,6 +35,18 @@ struct Expression {
   std::variant<RValue, LValue> v;
   template <class T>
   Expression(T&& arg) : v(std::forward<T>(arg)) {}
+};
+
+class Context {
+  using Frame = std::map<std::string, Value>;
+  std::vector<Frame> frames_stack;
+
+public:
+  Context() : frames_stack(1) {}
+  void push_frame();
+  void pop_frame();
+  Value& at(const std::string& name);
+  Value& insert(const std::string& name);
 };
 
 struct Node {

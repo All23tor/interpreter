@@ -4,6 +4,7 @@
 #include <charconv>
 #include <format>
 #include <functional>
+#include <ranges>
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
@@ -229,10 +230,7 @@ struct VariableNode final : public Node {
     }(_name)) {}
   virtual ~VariableNode() override = default;
   virtual Expression evaluate(Context& ctx) const override {
-    auto it = ctx.find(name);
-    if (it == ctx.end())
-      throw std::runtime_error(std::format("'{}' was not declared", name));
-    return LValue{&it->second};
+    return LValue{&ctx.at(name)};
   }
 };
 
@@ -284,12 +282,7 @@ struct LetNode final : public Node {
     }(_name.substr(op_name.size()))) {}
   virtual ~LetNode() override = default;
   virtual Expression evaluate(Context& ctx) const override {
-    auto [it, inserted] = ctx.insert({name, Value{std::monostate{}}});
-    if (!inserted)
-      throw std::runtime_error(
-        std::format("Variable '{}' already declared", name)
-      );
-    return LValue{&it->second};
+    return LValue{&ctx.insert(name)};
   }
 };
 
@@ -478,6 +471,30 @@ bool encapsulated(sv::t expr) {
   return true;
 }
 } // namespace
+
+void Context::push_frame() {
+  frames_stack.emplace_back();
+}
+void Context::pop_frame() {
+  frames_stack.pop_back();
+}
+Value& Context::at(const std::string& name) {
+  for (auto&& frame : std::views::reverse(frames_stack))
+    if (auto it = frame.find(name); it != frame.end())
+      return it->second;
+  throw std::runtime_error(
+    std::format("'{}' was not declared int this scope", name)
+  );
+}
+Value& Context::insert(const std::string& name) {
+  auto [it, inserted] =
+    frames_stack.back().insert({name, Value{std::monostate{}}});
+  if (!inserted)
+    throw std::runtime_error(
+      std::format("Variable '{}' already declared in this scope", name)
+    );
+  return it->second;
+}
 
 Value parse_value(sv::t expr) {
   if (expr == "()")
