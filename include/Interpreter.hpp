@@ -54,5 +54,4 @@ struct Node {
   virtual Expression evaluate(Context&) const = 0;
 };
 
-Value parse_value(std::string_view);
 std::unique_ptr<Node> parse_expression(std::string_view);
