@@ -360,7 +360,7 @@ static constexpr OperatorInfo binary_info = {
   .left_associative = A,
   .unary = false,
   .precedence = P,
-}; // namespace
+};
 
 static constexpr OperatorInfo let_info = {
   .name = LetNode::op_name,
@@ -462,7 +462,7 @@ std::unique_ptr<LiteralNode> try_parse_value(sv expr) {
     return std::make_unique<LiteralNode>(Value{false});
   if (expr.starts_with('"') && expr.find('"', 1) + 1 == expr.size())
     return std::make_unique<LiteralNode>(
-      Value{expr.substr(1, expr.size() - 2)}
+      Value{std::string(expr.substr(1, expr.size() - 2))}
     );
   {
     int i{};
