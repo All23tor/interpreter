@@ -34,6 +34,7 @@ using name_types = std::tuple<
   NameType<std::string, "string">,
   NameType<std::monostate, "unit">,
   NameType<Ptr, "ptr">,
+  NameType<Func, "function">,
   NameType<RValue, "rvalue">,
   NameType<LValue, "lvalue">,
   NameType<std::logical_or<>, "||">,
@@ -201,6 +202,9 @@ struct EmptyExpression : InvalidExpression {
   EmptyExpression() :
     InvalidExpression("Expected an expression, found nothing instead") {};
 };
+struct InvalidParenthesis : InvalidExpression {
+  InvalidParenthesis() : InvalidExpression("Wrong use of parenthesis") {}
+};
 struct InvalidVariable : InvalidExpression {
   InvalidVariable(sv _name) :
     InvalidExpression(std::format("'{}' is not a valid variable name", _name)) {
@@ -242,43 +246,6 @@ struct VariableNode final : public Node {
   virtual ~VariableNode() override = default;
   virtual Expression evaluate(Context& ctx) const override {
     return LValue{&ctx.at(name)};
-  }
-};
-
-template <class F>
-struct BinaryOperationNode final : public Node {
-  static constexpr sv op_name = name_type<F>();
-  NodePtr left;
-  NodePtr right;
-
-  BinaryOperationNode(sv expr, std::size_t pos) try :
-    left(parse_expression(expr.substr(0, pos))),
-    right(parse_expression(expr.substr(pos + op_name.size()))) {
-  } catch (const InvalidExpression& e) {
-    throw InvalidOperator(expr, op_name, e.what());
-  }
-  virtual ~BinaryOperationNode() override = default;
-  virtual Expression evaluate(Context& ctx) const override {
-    auto lhs = left->evaluate(ctx).v;
-    auto rhs = right->evaluate(ctx).v;
-
-    return std::visit(
-      []<class A, class B>(const A& a, const B& b) -> Expression {
-        if constexpr (requires { F{}(a, b); })
-          return F{}(a, b);
-        else
-          throw std::runtime_error(
-            std::format(
-              "Operator '{}' does not support categories '{}' and '{}'",
-              name_type<F>(),
-              name_type<A>(),
-              name_type<B>()
-            )
-          );
-      },
-      lhs,
-      rhs
-    );
   }
 };
 
@@ -330,6 +297,96 @@ struct UnaryOperationNode final : public Node {
   }
 };
 
+template <class F>
+struct BinaryOperationNode final : public Node {
+  static constexpr sv op_name = name_type<F>();
+  NodePtr left;
+  NodePtr right;
+
+  BinaryOperationNode(sv expr, std::size_t pos) try :
+    left(parse_expression(expr.substr(0, pos))),
+    right(parse_expression(expr.substr(pos + op_name.size()))) {
+  } catch (const InvalidExpression& e) {
+    throw InvalidOperator(expr, op_name, e.what());
+  }
+  virtual ~BinaryOperationNode() override = default;
+  virtual Expression evaluate(Context& ctx) const override {
+    auto lhs = left->evaluate(ctx).v;
+    auto rhs = right->evaluate(ctx).v;
+
+    return std::visit(
+      []<class A, class B>(const A& a, const B& b) -> Expression {
+        if constexpr (requires { F{}(a, b); })
+          return F{}(a, b);
+        else
+          throw std::runtime_error(
+            std::format(
+              "Operator '{}' does not support categories '{}' and '{}'",
+              name_type<F>(),
+              name_type<A>(),
+              name_type<B>()
+            )
+          );
+      },
+      lhs,
+      rhs
+    );
+  }
+};
+
+std::vector<NodePtr> parse_arguments(sv expr) {
+  std::vector<NodePtr> args;
+  for (auto&& arg : std::views::split(expr, ','))
+    args.push_back(parse_expression(sv{arg}));
+  return args;
+}
+
+struct CallNode final : public Node {
+  NodePtr callable;
+  std::vector<NodePtr> arguments;
+
+  CallNode(sv expr, std::size_t pos) try :
+    callable(parse_expression(expr.substr(0, pos))),
+    arguments(
+      expr.ends_with(')') ?
+        parse_arguments(expr.substr(pos + 1, expr.size() - pos - 2)) :
+        throw InvalidParenthesis()
+    ) {
+  } catch (const InvalidExpression& e) {
+    throw InvalidOperator(expr, "(...)", e.what());
+  }
+  virtual ~CallNode() override = default;
+  virtual Expression evaluate(Context& ctx) const override {
+    auto call = callable->evaluate(ctx).v;
+    const Func& func = std::visit(
+      [](auto&& arg) -> const Func& {
+        const Value& value = arg;
+        if (!std::holds_alternative<Func>(value.v))
+          throw std::runtime_error(
+            "Operator '(...)' must be called on value of type function"
+          );
+        return std::get<Func>(value.v);
+      },
+      call
+    );
+    if (func.args.size() != arguments.size())
+      throw std::runtime_error(
+        "Function called with wrong number of arguments"
+      );
+
+    std::vector<Expression> arg_exprs;
+    for (auto&& arg : arguments)
+      arg_exprs.push_back(arg->evaluate(ctx));
+
+    ctx.push_frame();
+    for (auto&& [name, expr] : std::views::zip(func.args, arg_exprs))
+      std::visit([&](auto&& value) { ctx.insert(name) = value; }, expr.v);
+    auto ans = func.body->evaluate(ctx);
+    ctx.pop_frame();
+    return RValue{std::visit([](auto&& arg) -> Value { return arg; }, ans.v)};
+  }
+};
+
 using NodeFactory = NodePtr (*)(sv, std::size_t);
 
 struct OperatorInfo {
@@ -362,6 +419,16 @@ static constexpr OperatorInfo binary_info = {
   .precedence = P,
 };
 
+static constexpr OperatorInfo call_info = {
+  .name = "(",
+  .factory = [](sv expr, std::size_t pos) -> NodePtr {
+    return std::make_unique<CallNode>(expr, pos);
+  },
+  .left_associative = true,
+  .unary = false,
+  .precedence = 2,
+};
+
 static constexpr OperatorInfo let_info = {
   .name = LetNode::op_name,
   .factory = [](sv expr, std::size_t) -> NodePtr {
@@ -391,6 +458,7 @@ static constexpr std::array operators = {
   unary_info<std::logical_not<>, false, 3>,
   unary_info<RefOf, false, 3>,
   unary_info<DerefOf, false, 3>,
+  call_info,
   let_info,
 };
 static constexpr OperatorInfo NullInfo{
@@ -399,7 +467,8 @@ static constexpr OperatorInfo NullInfo{
 
 bool is_unary_operator(sv expr, std::size_t operator_pos) {
   auto left = trim(expr.substr(0, operator_pos));
-  return left.empty() || (left.back() != ')' && !is_alnum(left.back()));
+  return left.empty() ||
+    (left.back() != ')' && left.back() != '"' && !is_alnum(left.back()));
 }
 
 NodePtr try_parse_operator(sv expr) {

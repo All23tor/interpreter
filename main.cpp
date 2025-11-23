@@ -19,6 +19,8 @@ struct std::formatter<Value> {
           return std::format_to(ctx.out(), "()");
         else if constexpr (std::is_same_v<T, Ptr>)
           return std::format_to(ctx.out(), "ptr -> {}", *arg.ptr);
+        else if constexpr (std::is_same_v<T, Func>)
+          return std::format_to(ctx.out(), "function ({:n}))", arg.args);
         else if constexpr (std::is_same_v<T, float>)
           return std::format_to(ctx.out(), "{:#}", arg);
         else

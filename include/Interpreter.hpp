@@ -1,3 +1,4 @@
+#include <concepts>
 #include <map>
 #include <memory>
 #include <utility>
@@ -8,9 +9,14 @@ struct Value;
 struct Ptr {
   Value* ptr;
 };
+struct Node;
+struct Func {
+  std::vector<std::string> args;
+  std::shared_ptr<Node> body;
+};
 struct Value {
-  std::variant<std::monostate, bool, int, float, std::string, Ptr> v;
-  template <class T>
+  std::variant<std::monostate, bool, int, float, std::string, Ptr, Func> v;
+  template <std::convertible_to<decltype(v)> T>
   Value(T&& arg) : v(std::forward<T>(arg)) {}
 };
 struct LValue {
