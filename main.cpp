@@ -46,10 +46,18 @@ struct std::formatter<Expression> {
 
 int main() {
   Context context;
-  std::string expression;
-  while (!std::cin.eof()) {
+  while (std::cin) {
     std::print(std::clog, "> ");
-    std::getline(std::cin, expression, ';');
+    std::string expression;
+    std::string line;
+    while (std::getline(std::cin, line)) {
+      expression += line + "\n";
+      if (auto end = expression.rfind(";;"); end != std::string::npos) {
+        expression.erase(end);
+        break;
+      }
+    }
+
     if (expression.empty())
       continue;
     try {
